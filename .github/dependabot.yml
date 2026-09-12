@@ -1,0 +1,10 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    # Electron and the toolchain move constantly; one PR a week each is enough.
+    groups:
+      dev-dependencies:
+        dependency-type: development
