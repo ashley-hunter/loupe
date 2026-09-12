@@ -1,0 +1,318 @@
+// The domain model. These names are the ones the interface uses too, so a rename
+// here is a rename in both places.
+
+/** Identifies a Session. Never interchangeable with a RequestId. */
+export type SessionId = string & { readonly __brand: 'SessionId' };
+/** Identifies a Request. Never interchangeable with a SessionId. */
+export type RequestId = string & { readonly __brand: 'RequestId' };
+
+/**
+ * Token counts for one Request.
+ *
+ * A Request writes one Transcript record per content block and repeats its usage
+ * on every one of them, so these are only ever read from a Request's *last*
+ * record. Summing across records overcounts by roughly 1.82x.
+ */
+export interface Usage {
+  input: number;
+  cacheRead: number;
+  cacheWrite: number;
+  output: number;
+  thinking: number;
+}
+
+export type InvalidationCause =
+  /** The gap since the previous Request exceeded the cache lifetime. */
+  | 'expiry'
+  /** A different model was used, so the prefix could not be reused. */
+  | 'model-change'
+  /**
+   * The context was compacted: it did not move, it shrank. A 1M context
+   * replaced by 54k is the cache working, not waste, so this is never a
+   * Finding and never counted as avoidable.
+   */
+  | 'compaction'
+  /**
+   * The prefix was rebuilt while the Session was active and the context as a
+   * whole was preserved — the same tokens, re-split between read and written.
+   * Happens as a conversation grows large, with gaps far too short to be
+   * Expiry. Mechanical, not something done wrong.
+   */
+  | 'reanchor'
+  /** None of the above could be established. Reported as-is, never guessed at. */
+  | 'undetermined';
+
+/** A point where a Request rebuilt the cached prefix instead of reading it. */
+export interface Invalidation {
+  sessionId: SessionId;
+  sessionName: string;
+  project: string;
+  at: string;
+  cause: InvalidationCause;
+  /** Tokens written to rebuild the prefix. */
+  rewritten: number;
+  /** Gap since the previous Request — the thing that causes Expiry. */
+  idleMs: number;
+  detail?: string;
+}
+
+export const EMPTY_USAGE: Usage = { input: 0, cacheRead: 0, cacheWrite: 0, output: 0, thinking: 0 };
+
+/**
+ * New tokens: everything sent or produced that was not served from cache.
+ *
+ * This is the only honest "total" for a Session. `cacheRead` must never be added
+ * into it — every Request re-reads the whole prefix, so summing cacheRead across
+ * a Session counts the same tokens once per Request (21M for a 172-Request
+ * Session). Report cacheRead on its own, never inside a total.
+ */
+export const newTokens = (u: Usage): number => u.input + u.cacheWrite + u.output;
+
+/** Share of input that came from cache rather than being rewritten. 0..1, or null when there was no input at all. */
+export function cacheHitRate(u: Usage): number | null {
+  const total = u.cacheRead + u.cacheWrite + u.input;
+  return total === 0 ? null : u.cacheRead / total;
+}
+
+export type EventKind =
+  | 'user'
+  | 'asst'
+  | 'think'
+  | 'read'
+  | 'edit'
+  | 'bash'
+  | 'grep'
+  | 'web'
+  | 'mcp'
+  | 'agent'
+  | 'tool'
+  | 'compact'
+  | 'model'
+  | 'config';
+
+/** One entry in a Transcript — the unit the Timeline renders. */
+export interface Event {
+  id: string;
+  kind: EventKind;
+  /** ISO timestamp. */
+  at: string;
+  title: string;
+  subtitle?: string;
+  /** Tool result or message body, truncated for display. */
+  body?: string;
+  /** Nesting depth. 0 is the main Session, 1+ is inside a Subagent. */
+  depth: number;
+  /** The Request this Event belongs to, when it belongs to one. */
+  request?: RequestId;
+  /**
+   * What this Event added to the context, in tokens. Null when it cannot be
+   * Measured. When `sharedCost` is set, this figure covers every Event in the
+   * group and must not be summed with its siblings.
+   */
+  cost: number | null;
+  /** Set when several tool calls shared one Request and their costs cannot be split. */
+  sharedCost?: boolean;
+  /** Tool name, for Events that are tool calls. Grouped on by the Tools tab. */
+  tool?: string;
+  /** File path, for Events that read or wrote one. Grouped on by the Files tab. */
+  path?: string;
+  /** The `tool_use` id, when this Event is one. Links a Subagent to the call that spawned it. */
+  toolUseId?: string;
+  /** Tool failure, e.g. a non-zero exit code. */
+  failed?: boolean;
+}
+
+/** One round trip to the model. */
+export interface Request {
+  id: RequestId;
+  at: string;
+  model: string;
+  usage: Usage;
+  /** Number of tool calls this Request issued. 2+ means their costs are shared. */
+  toolCalls: number;
+  /** Cache writes made against the one-hour cache rather than the five-minute one. */
+  oneHourWrite: number;
+}
+
+/**
+ * The limits the usage endpoint reports.
+ * - `session`       the rolling five-hour Block
+ * - `weekly_all`    the seven-day account limit
+ * - `weekly_scoped` the seven-day limit for one model
+ */
+export type LimitKind = 'session' | 'weekly_all' | 'weekly_scoped';
+
+export interface Limit {
+  kind: LimitKind;
+  /** Percentage of the limit consumed, 0-100, as reported. */
+  percent: number;
+  /** When this window resets. Doubles as the Block boundary. */
+  resetsAt: string | null;
+  severity: string;
+  /** Only `weekly_scoped` names a model. */
+  model: string | null;
+}
+
+/** One reading of the Allowance, taken by the poller. */
+export interface UsageSample {
+  at: string;
+  limits: Limit[];
+}
+
+/** A gap longer than this is someone walking away, not the Session running. */
+export const IDLE_GAP_MS = 5 * 60 * 1000;
+
+export type SessionStatus = 'completed' | 'active' | 'interrupted';
+
+/** A Session as it appears in the sessions list. Cheap to build, cheap to cache. */
+export interface SessionSummary {
+  id: SessionId;
+  /** Absolute path to the Transcript. */
+  path: string;
+  /** Derived from the Session's cwd. */
+  project: string;
+  /** The Session's working directory. File paths are shown relative to it. */
+  cwd: string;
+  name: string;
+  startedAt: string;
+  endedAt: string;
+  /** First Event to last Event. Spans idle time, so a resumed Session can span days. */
+  spanMs: number;
+  /**
+   * Time actually worked: the gaps between consecutive Events, excluding any
+   * gap longer than IDLE_GAP_MS. A Session left open overnight has a span of
+   * days and an active time of minutes.
+   */
+  activeMs: number;
+  /** Every model used, most-used first. */
+  models: string[];
+  prompts: number;
+  toolCalls: number;
+  /** How many Requests the Session made. The Requests themselves live on SessionDetail. */
+  requestCount: number;
+  usage: Usage;
+  subagents: number;
+  status: SessionStatus;
+  /**
+   * Share of the Block's rolling limit this Session consumed. Null for every
+   * Session that ended before the app was installed: the reading simply does not
+   * exist. Never estimated, and never summed across Sessions when
+   * `allowanceShared` is set.
+   */
+  allowance: number | null;
+  allowanceShared?: boolean;
+  /** Weekly limit consumed across the Session's span, on the same terms as `allowance`. */
+  weekly?: number | null;
+}
+
+/**
+ * A delegated agent with its own context window.
+ *
+ * Claude Code writes one Transcript plus a `.meta.json` per Subagent under
+ * `<session>/subagents/`. The meta names the agent and carries the `toolUseId`
+ * of the Task call that spawned it, which is how a Subagent is tied to its
+ * place in the parent's Timeline.
+ */
+export interface Subagent {
+  id: string;
+  /** "Explore", "general-purpose", and so on. */
+  type: string;
+  description: string;
+  /** The parent Event that spawned this Subagent, if it is still in the Transcript. */
+  toolUseId: string | null;
+  /** 1 for a Subagent of the main Session, 2 for one it spawned in turn. */
+  spawnDepth: number;
+  model: string;
+  usage: Usage;
+  requestCount: number;
+  toolCalls: number;
+  durationMs: number;
+}
+
+export type FindingCategory = 'context' | 'duplication' | 'cache' | 'behaviour';
+
+/**
+ * One occurrence a Detector reported: a fixed explanatory sentence with
+ * Measured numbers slotted into it, the evidence it came from, and what acting
+ * on it would give back.
+ */
+/** Which Detector produced a Finding. Findings of one kind group into one card. */
+export type FindingKind =
+  | 'reanchor'
+  | 'duplicate-read'
+  | 'model-change'
+  | 'retry-churn'
+  | 'binary-read'
+  | 'thinking-heavy'
+  | 'web-repeat';
+
+export interface Finding {
+  id: string;
+  kind: FindingKind;
+  category: FindingCategory;
+  sessionId: SessionId;
+  sessionPath: string;
+  sessionName: string;
+  project: string;
+  /** Which Detail tab shows the evidence. */
+  tab: 'timeline' | 'cache' | 'files' | 'tools' | 'agents';
+  /** Tokens that acting on this would give back. */
+  recoverable: number;
+  /**
+   * The shared explanation for this kind of Finding. Identical across every
+   * Finding of the same kind, so it is shown once per group rather than
+   * repeated on each.
+   */
+  explanation: string;
+  /** What happened in this particular Session, with its own Measured numbers. */
+  text: string;
+  evidence: string;
+}
+
+export type AlertKind = 'oversized-result' | 'prefix-rebuilt';
+
+/**
+ * Something expensive that just happened in the running Session.
+ *
+ * Raised after the fact — Transcripts are written once a Request completes — so
+ * an Alert reports what was spent, never what to avoid.
+ */
+export interface Alert {
+  id: string;
+  kind: AlertKind;
+  sessionId: SessionId;
+  sessionName: string;
+  project: string;
+  at: string;
+  title: string;
+  detail: string;
+  tokens: number;
+}
+
+export type RecommendationKind = 'unused-mcp' | 'model-routing';
+
+/**
+ * Something worth acting on whose saving cannot be Measured.
+ *
+ * Kept distinct from a Finding, which always carries a token figure. A
+ * Recommendation states what it found and why it matters, and never a number
+ * it cannot back up.
+ */
+export interface Recommendation {
+  id: string;
+  kind: RecommendationKind;
+  title: string;
+  text: string;
+  /** The specifics — which servers, which agents. */
+  detail: string;
+  /** Always false. Present so that adding a costable one later is a type error. */
+  costable: false;
+}
+
+/** A Session with its Events loaded. Built on demand, never cached. */
+export interface SessionDetail extends SessionSummary {
+  events: Event[];
+  requests: Request[];
+  subagentDetail: Subagent[];
+  invalidations: Invalidation[];
+}

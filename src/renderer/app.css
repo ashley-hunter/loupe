@@ -1,0 +1,509 @@
+/*
+ * Base styles.
+ *
+ * Two jobs. First, carry the design's tokens verbatim — the palettes below are
+ * copied from the design file, not re-derived, so a colour here should only ever
+ * change because the design changed. Second, stop the app feeling like a web
+ * page: browsers default to document behaviour (I-beam cursors over labels, text
+ * selection on every drag, rubber-band overscroll, tap highlights, hand cursors
+ * on anything clickable) and native apps do none of it, so it is switched off
+ * here and switched back on deliberately for the parts that really are content.
+ */
+
+/* Bundled rather than fetched: the app works offline and needs no network CSP. */
+@import '@fontsource/public-sans/300.css';
+@import '@fontsource/public-sans/400.css';
+@import '@fontsource/public-sans/500.css';
+@import '@fontsource/public-sans/600.css';
+@import '@fontsource/public-sans/700.css';
+@import '@fontsource/jetbrains-mono/400.css';
+@import '@fontsource/jetbrains-mono/500.css';
+@import '@fontsource/jetbrains-mono/600.css';
+
+:root {
+  --bg: #faf9f8;
+  --panel: #ffffff;
+  --side: #f4f3f1;
+  --line: #e5e2de;
+  --lineSoft: #efece8;
+  --fg: #1c1a19;
+  --dim: #6f6a65;
+  --faint: #9a938c;
+  --accent: #c15f3c;
+  --accentSoft: rgba(193, 95, 60, 0.07);
+  --accentBd: rgba(193, 95, 60, 0.4);
+  --hover: rgba(120, 112, 104, 0.07);
+  --track: #e2ded9;
+  --codeBg: #f6f4f1;
+  --blue: #6f93b8;
+  --green: #3f7d4e;
+  --warn: #b8791f;
+  --warnBg: #fdf8ef;
+  --err: #b5443a;
+  --errBg: #fdf3f1;
+  --errBd: #e8c4bf;
+  --live: #3f7d4e;
+
+  --barH: 42px;
+  --rowH: 44px;
+  --headH: 28px;
+  --navH: 30px;
+  --sw: 196px;
+  --sidePad: 12px;
+  --sans: 'Public Sans', system-ui, -apple-system, sans-serif;
+  --mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+:root[data-theme='dark'] {
+  --bg: #141413;
+  --panel: #1a1a19;
+  --side: #111110;
+  --line: #2c2b28;
+  --lineSoft: #232220;
+  --fg: #eceae6;
+  --dim: #a29b93;
+  --faint: #6f6862;
+  --accent: #d97757;
+  --accentSoft: rgba(217, 119, 87, 0.1);
+  --accentBd: rgba(217, 119, 87, 0.45);
+  --hover: rgba(255, 255, 255, 0.05);
+  --track: #2c2b28;
+  --codeBg: #111110;
+  --blue: #6f93b8;
+  --green: #5c9a6c;
+  --warn: #c99034;
+  --warnBg: rgba(201, 144, 52, 0.1);
+  --err: #d1584c;
+  --errBg: rgba(209, 88, 76, 0.1);
+  --errBd: rgba(209, 88, 76, 0.34);
+  --live: #5c9a6c;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--sans);
+  font-size: 13px;
+
+  /*
+   * Text rendering. macOS stopped subpixel-antialiasing years ago, so grayscale
+   * is what native controls actually get; asking for it explicitly stops the
+   * weight from shifting between this app and the rest of the system.
+   */
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  font-synthesis: none;
+
+  /* Desktop apps do not select their own chrome when you drag across it. */
+  user-select: none;
+  -webkit-user-select: none;
+
+  /* Arrow cursor everywhere by default; content opts back in below. */
+  cursor: default;
+
+  /* No rubber-band bounce past the edge of the window. */
+  overscroll-behavior: none;
+
+  /* No blue flash on press. */
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Nothing in the UI is draggable as an image or a link. */
+img,
+a {
+  -webkit-user-drag: none;
+  user-drag: none;
+}
+
+/*
+ * Content, and only content, behaves like text: real message bodies, tool
+ * output, file paths, commands — the things you would actually want to copy.
+ */
+.selectable,
+.selectable * {
+  user-select: text;
+  -webkit-user-select: text;
+  cursor: auto;
+}
+
+::selection {
+  background: rgba(193, 95, 60, 0.22);
+}
+:root[data-theme='dark'] ::selection {
+  background: rgba(217, 119, 87, 0.26);
+}
+
+/*
+ * Controls keep the arrow cursor. A hand cursor over a button is a web
+ * convention that native apps do not share, and it is the single loudest
+ * giveaway that something is a web view.
+ */
+button,
+[role='button'],
+[role='tab'],
+[role='menuitem'],
+summary {
+  cursor: default;
+  font: inherit;
+  color: inherit;
+}
+
+/* Text inputs are the exception — they get a real I-beam. */
+input,
+textarea {
+  cursor: text;
+  font: inherit;
+  color: inherit;
+}
+
+/* Focus rings only for keyboard users; showing them on click reads as webby. */
+:focus {
+  outline: none;
+}
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(128, 120, 112, 0.35);
+  border-radius: 6px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(128, 120, 112, 0.55);
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/*
+ * The top bar doubles as the window's drag handle so the app moves when you
+ * drag empty space, like any native window. Interactive children opt out.
+ */
+.drag-region {
+  -webkit-app-region: drag;
+}
+.drag-region button,
+.drag-region input,
+.drag-region [role='button'] {
+  -webkit-app-region: no-drag;
+}
+
+/* On macOS the OS draws its window buttons over the top-left of the window. */
+.traffic-light-inset {
+  padding-left: var(--sidePad);
+}
+body[data-platform='darwin'] .traffic-light-inset {
+  padding-left: 78px;
+}
+
+/*
+ * A quiet button: no border until you approach it, then a surface to press.
+ * Used for navigation and secondary actions, where a permanent outline would
+ * compete with the content.
+ */
+.ghost-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  height: 26px;
+  padding: 0 10px 0 7px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--dim);
+  font-size: 12px;
+  transition:
+    background-color 120ms ease,
+    color 120ms ease,
+    border-color 120ms ease;
+}
+.ghost-button:hover {
+  background: var(--hover);
+  border-color: var(--line);
+  color: var(--fg);
+}
+.ghost-button:active:not(:disabled) {
+  background: var(--accentSoft);
+  border-color: var(--accentBd);
+  color: var(--accent);
+}
+
+/* ---- Design primitives ------------------------------------------------- */
+
+/* Figures are mono and tabular so columns line up digit for digit. */
+.mono {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+.num {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 11.5px;
+  text-align: right;
+  color: var(--dim);
+}
+
+/* A blank is a real value meaning "not measurable", not a missing one. */
+.blank {
+  color: var(--faint);
+}
+
+/* Section labels: small, wide-tracked, uppercase. */
+.eyebrow {
+  font-size: 10px;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--faint);
+  font-weight: 650;
+}
+
+/* The bar at the top of every screen. */
+.topbar {
+  height: var(--barH);
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+}
+
+/* Column header strip above a list. */
+.thead {
+  column-gap: 12px;
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: grid;
+  align-items: center;
+  height: var(--headH);
+  padding: 0 12px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--line);
+  font-size: 10px;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--faint);
+  font-weight: 650;
+}
+
+.trow {
+  display: grid;
+  column-gap: 12px;
+  align-items: center;
+  height: var(--rowH);
+  padding: 0 12px;
+  border-bottom: 1px solid var(--line);
+}
+.trow:hover {
+  background: var(--hover);
+}
+/*
+ * Inside a bordered container the final row's divider lands a pixel inside the
+ * container's own border and reads as a double line. At the end of an unbordered
+ * list there is nothing to divide from either, so dropping it is right in both.
+ */
+.trow:last-child {
+  border-bottom: none;
+}
+
+/*
+ * Tabs. Base UI marks the active tab with data-selected; without styling it the
+ * tab strip gives no indication of which panel you are looking at.
+ */
+.tab {
+  border: none;
+  background: none;
+  padding: 9px 10px;
+  font-size: 10px;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  font-weight: 650;
+  color: var(--dim);
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+/* Base UI marks state with aria-*, not data-selected or :disabled. */
+.tab[aria-selected='true'] {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+.tab[aria-disabled='true'] {
+  color: var(--faint);
+}
+
+/*
+ * Rows inside a bordered group. The last row drops its divider, which would
+ * otherwise sit a pixel inside the container's own border and read as a double
+ * line — a :last-child rule, so it cannot be done with inline styles.
+ */
+.group-row {
+  border-bottom: 1px solid var(--lineSoft);
+}
+.group-row:last-child {
+  border-bottom: none;
+}
+
+/*
+ * A scrolling screen body. The pane spans the full width so its scrollbar sits
+ * against the window edge; `pane-content` is what gets a readable max width.
+ * Putting the max width on the pane itself strands the scrollbar mid-screen.
+ */
+.scroll-pane {
+  overflow: auto;
+  min-height: 0;
+  flex: 1;
+}
+/*
+ * Fills the pane. Charts read better the more width they get; the prose blocks
+ * inside set their own measure, so nothing here ends up over-long.
+ */
+.pane-content {
+  padding: 16px;
+}
+
+.ellipsis {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+/* ---- Motion -------------------------------------------------------------
+ *
+ * Almost nothing here animates, deliberately. This is a monitor that stays
+ * open, and switching screens or scanning a table happens dozens of times an
+ * hour — animating either would put a delay in front of something done
+ * constantly. Only things that *enter* the screen and are seen occasionally get
+ * motion: the palette, tooltips, an alert arriving, a section being opened.
+ *
+ * Easing follows the usual rule — ease-out for anything entering or leaving,
+ * because the fast start reads as responsive.
+ */
+
+:root {
+  --ease-out-quad: cubic-bezier(0.25, 0.46, 0.45, 0.94);
+  --ease-out-cubic: cubic-bezier(0.215, 0.61, 0.355, 1);
+}
+
+/* Pressing something should feel like pressing something. */
+button:active:not(:disabled) {
+  transform: scale(0.97);
+}
+button {
+  transition: transform 100ms var(--ease-out-quad);
+}
+
+/* The palette: scales from 0.98, never from 0 — anything smaller reads as a
+   zoom rather than an appearance. The backdrop shares its timing so the two
+   move as one thing. */
+@keyframes palette-in {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) scale(0.98);
+  }
+}
+@keyframes palette-out {
+  to {
+    opacity: 0;
+    transform: translateX(-50%) scale(0.98);
+  }
+}
+[data-palette][data-starting-style] {
+  animation: palette-in 180ms var(--ease-out-cubic);
+}
+[data-palette][data-ending-style] {
+  /* Exits run faster than entrances; nobody wants to wait to dismiss. */
+  animation: palette-out 140ms var(--ease-out-cubic);
+}
+
+@keyframes backdrop-in {
+  from {
+    opacity: 0;
+  }
+}
+[data-backdrop][data-starting-style] {
+  animation: backdrop-in 180ms var(--ease-out-cubic);
+}
+[data-backdrop][data-ending-style] {
+  animation: backdrop-in 140ms var(--ease-out-cubic) reverse;
+}
+
+/* Tooltips: a short rise, because they appear near the pointer and a long
+   travel would feel detached from it. */
+@keyframes tip-in {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+}
+[data-tooltip][data-starting-style] {
+  animation: tip-in 130ms var(--ease-out-quad);
+}
+[data-tooltip][data-ending-style] {
+  animation: tip-in 100ms var(--ease-out-quad) reverse;
+}
+
+/* An alert is new information arriving, and is rare enough to deserve motion. */
+@keyframes alert-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+}
+.alert-banner {
+  animation: alert-in 220ms var(--ease-out-cubic);
+}
+
+/* Base UI gives the panel its natural height as a variable, so this can animate
+   height without measuring anything. */
+@keyframes collapse-open {
+  from {
+    height: 0;
+    opacity: 0;
+  }
+  to {
+    height: var(--collapsible-panel-height);
+    opacity: 1;
+  }
+}
+.collapsible-panel {
+  overflow: hidden;
+}
+.collapsible-panel[data-starting-style],
+.collapsible-panel[data-open] {
+  animation: collapse-open 200ms var(--ease-out-cubic);
+}
+.collapsible-panel[data-ending-style] {
+  animation: collapse-open 160ms var(--ease-out-cubic) reverse;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

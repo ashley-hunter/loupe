@@ -1,0 +1,2 @@
+# The full gate, so a green push means CI will be green too.
+npm run typecheck && npm test

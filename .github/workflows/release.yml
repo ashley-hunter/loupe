@@ -1,0 +1,162 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.name }}
+    strategy:
+      # One platform failing should not throw away the artefacts of the others.
+      fail-fast: false
+      matrix:
+        include:
+          # The latest*.yml and .blockmap files are what electron-updater reads;
+          # without them in the release, an installed app never sees the new
+          # version. The mac zip is what it actually installs from.
+          - os: macos-latest
+            name: macOS
+            platform: --mac
+            artifacts: |
+              release/*.dmg
+              release/*.zip
+              release/*.blockmap
+              release/latest-mac.yml
+          - os: windows-latest
+            name: Windows
+            platform: --win
+            artifacts: |
+              release/*.exe
+              release/*.blockmap
+              release/latest.yml
+          - os: ubuntu-latest
+            name: Linux
+            platform: --linux
+            artifacts: |
+              release/*.AppImage
+              release/*.deb
+              release/latest-linux.yml
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # The same gate as a pull request, on the platform being shipped. A release
+      # should never be the first time this code ran on this OS.
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      # --- Signing -------------------------------------------------------
+      # Each platform signs when its certificate secrets exist and produces an
+      # unsigned build when they do not, so this workflow works today and starts
+      # signing the moment the secrets are added.
+
+      - name: Decide whether macOS can sign
+        if: matrix.os == 'macos-latest'
+        id: mac
+        env:
+          CERT: ${{ secrets.MAC_CERTIFICATE_P12 }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+        run: |
+          if [ -n "$CERT" ] && [ -n "$APPLE_ID" ]; then
+            echo "mode=signed" >> "$GITHUB_OUTPUT"
+          elif [ -n "$CERT" ]; then
+            echo "mode=signed-not-notarised" >> "$GITHUB_OUTPUT"
+          else
+            echo "mode=unsigned" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Package macOS
+        if: matrix.os == 'macos-latest'
+        env:
+          CSC_LINK: ${{ secrets.MAC_CERTIFICATE_P12 }}
+          CSC_KEY_PASSWORD: ${{ secrets.MAC_CERTIFICATE_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          case "${{ steps.mac.outputs.mode }}" in
+            signed)               npx electron-builder --mac --publish never -c.mac.notarize=true ;;
+            signed-not-notarised) npx electron-builder --mac --publish never ;;
+            unsigned)             npx electron-builder --mac --publish never -c.mac.identity=null ;;
+          esac
+
+      - name: Package Windows
+        if: matrix.os == 'windows-latest'
+        shell: bash
+        env:
+          CSC_LINK: ${{ secrets.WINDOWS_CERTIFICATE_PFX }}
+          CSC_KEY_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          # Unsetting rather than passing an empty CSC_LINK: an empty value is
+          # still a value, and electron-builder would try to read it as a
+          # certificate path. Absent means unsigned, which is the default here.
+          if [ -z "$CSC_LINK" ]; then
+            unset CSC_LINK CSC_KEY_PASSWORD
+            npx electron-builder --win --publish never -c.win.signtoolOptions=null
+          else
+            npx electron-builder --win --publish never
+          fi
+
+      - name: Package Linux
+        if: matrix.os == 'ubuntu-latest'
+        # There is no signing convention for a directly downloaded AppImage or
+        # deb, so nothing to configure here.
+        run: npx electron-builder --linux --publish never
+
+      - uses: actions/upload-artifact@v5
+        with:
+          name: ${{ matrix.name }}
+          path: ${{ matrix.artifacts }}
+          if-no-files-found: error
+
+  publish:
+    name: Publish the release
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/download-artifact@v5
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/**/*
+          generate_release_notes: true
+          body: |
+            Allowance is read from Anthropic's usage endpoint using the token
+            Claude Code already stores — the login Keychain on macOS,
+            `~/.claude/.credentials.json` elsewhere. Everything else comes from
+            the transcripts under `~/.claude/projects` and needs no credentials.
+
+            An installed build checks this page for newer releases and updates
+            itself. The dmg, exe and AppImage are the ones to download; the zip,
+            blockmap and yml files are how the updater finds its way here.
+
+            Builds are code-signed only when the certificate secrets are set. If
+            they are not, each OS objects the first time you open one:
+
+            - **macOS**: right-click the app and choose Open.
+            - **Windows**: SmartScreen, More info, then Run anyway.
+            - **Linux**: `chmod +x` the AppImage before running it.
