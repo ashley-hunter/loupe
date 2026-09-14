@@ -27,6 +27,13 @@ jobs:
               release/*.zip
               release/*.blockmap
               release/latest-mac.yml
+          - os: windows-latest
+            name: Windows
+            platform: --win
+            artifacts: |
+              release/*.exe
+              release/*.blockmap
+              release/latest.yml
           - os: ubuntu-latest
             name: Linux
             platform: --linux
@@ -102,13 +109,18 @@ jobs:
         run: |
           # Unsetting rather than passing an empty CSC_LINK: an empty value is
           # still a value, and electron-builder would try to read it as a
-          # certificate path. Absent means unsigned, which is the default here.
+          # certificate path. With no certificate at all it produces an unsigned
+          # build, which is what we want here.
+          #
+          # Do not try to force that with -c.win.signtoolOptions=null. A value
+          # given on the command line arrives as the string "null", which fails
+          # schema validation before anything is built. The mac equivalent,
+          # -c.mac.identity=null, is special-cased by electron-builder; this one
+          # is not.
           if [ -z "$CSC_LINK" ]; then
             unset CSC_LINK CSC_KEY_PASSWORD
-            npx electron-builder --win --publish never -c.win.signtoolOptions=null
-          else
-            npx electron-builder --win --publish never
           fi
+          npx electron-builder --win --publish never
 
       - name: Package Linux
         if: matrix.os == 'ubuntu-latest'
@@ -125,6 +137,10 @@ jobs:
   publish:
     name: Publish the release
     needs: build
+    # Only a tag can become a release. A workflow_dispatch run builds all three
+    # platforms and leaves the artefacts on the run, which is the useful way to
+    # test a release without cutting one.
+    if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
 
     steps:
@@ -139,7 +155,7 @@ jobs:
           generate_release_notes: true
           body: |
             Allowance is read from Anthropic's usage endpoint using the token
-            Claude Code already stores — the login Keychain on macOS,
+            Claude Code already stores: the login Keychain on macOS,
             `~/.claude/.credentials.json` elsewhere. Everything else comes from
             the transcripts under `~/.claude/projects` and needs no credentials.
 
