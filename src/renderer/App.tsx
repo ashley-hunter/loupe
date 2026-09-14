@@ -443,6 +443,7 @@ function CurrentScreen(p: ScreenProps) {
         onDismissAlerts={p.onDismissAlerts}
         usage={p.usage}
         onOpen={p.onDetail}
+        collapseAbove={p.prefs.collapseAbove}
       />
     );
   }

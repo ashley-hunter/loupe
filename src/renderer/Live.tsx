@@ -3,12 +3,12 @@ import {
   cacheHitRate,
   newTokens,
   type Alert,
-  type Event,
   type SessionDetail,
   type UsageSample,
 } from '../shared/model.js';
-import { KIND } from './kinds.js';
 import { Empty } from './ui/Empty.js';
+import { EventRow } from './ui/EventRow.js';
+import { Inspector } from './ui/Inspector.js';
 import { Stat } from './ui/Stat.js';
 import { StatStrip } from './ui/StatStrip.js';
 import { clock, duration, percent, tokens } from './format.js';
@@ -21,15 +21,18 @@ export function Live({
   alerts,
   onDismissAlerts,
   onOpen,
+  collapseAbove,
 }: {
   usage: UsageSample | null;
   alerts: Alert[];
   onDismissAlerts: () => void;
   onOpen: (detail: SessionDetail) => void;
+  collapseAbove: number;
 }) {
   const [session, setSession] = useState<SessionDetail | null>(null);
   const [waiting, setWaiting] = useState(true);
   const [pinned, setPinned] = useState(true);
+  const [selected, setSelected] = useState<string | null>(null);
   const feed = useRef<HTMLDivElement>(null);
   const previousCount = useRef(0);
 
@@ -75,6 +78,9 @@ export function Live({
 
   const events = session.events.slice(-TAIL);
   const limit = usage?.limits.find((l) => l.kind === 'session');
+  // Looked up in the whole Session rather than the visible tail, so the panel
+  // keeps its Event once new ones push it out of the feed.
+  const event = session.events.find((e) => e.id === selected) ?? null;
 
   return (
     <Shell
@@ -100,23 +106,36 @@ export function Live({
         />
       </StatStrip>
 
-      <div
-        ref={feed}
-        onScroll={(e) => {
-          const el = e.currentTarget;
-          // Re-pin only when the reader returns to the bottom themselves.
-          setPinned(el.scrollHeight - el.scrollTop - el.clientHeight < 24);
-        }}
-        style={{ overflow: 'auto', minHeight: 0, flex: 1 }}
-      >
-        {events.map((e) => (
-          <Row key={e.id} event={e} />
-        ))}
-        {events.length === 0 && (
-          <div style={{ padding: 40, textAlign: 'center', color: 'var(--faint)' }}>
-            No events yet.
-          </div>
-        )}
+      <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
+        <div
+          ref={feed}
+          onScroll={(e) => {
+            const el = e.currentTarget;
+            // Re-pin only when the reader returns to the bottom themselves.
+            setPinned(el.scrollHeight - el.scrollTop - el.clientHeight < 24);
+          }}
+          style={{ overflow: 'auto', minHeight: 0, minWidth: 0, flex: 1 }}
+        >
+          {events.map((e) => (
+            <EventRow
+              key={e.id}
+              event={e}
+              active={e.id === selected}
+              onSelect={() => {
+                setSelected(e.id);
+                // Stop following the tail: reading an Event while the feed
+                // scrolls out from under you is the thing this panel is for.
+                setPinned(false);
+              }}
+            />
+          ))}
+          {events.length === 0 && (
+            <div style={{ padding: 40, textAlign: 'center', color: 'var(--faint)' }}>
+              No events yet.
+            </div>
+          )}
+        </div>
+        {selected !== null && <Inspector event={event} collapseAbove={collapseAbove} />}
       </div>
 
       {!pinned && (
@@ -223,48 +242,6 @@ function Shell({
         )}
       </div>
       {children}
-    </div>
-  );
-}
-
-function Row({ event }: { event: Event }) {
-  const [label, colour] = KIND[event.kind];
-  return (
-    <div
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: 10,
-        minHeight: 28,
-        padding: `4px 12px 4px ${12 + event.depth * 18}px`,
-        borderBottom: '1px solid var(--lineSoft)',
-      }}
-    >
-      <span className="mono" style={{ color: 'var(--faint)', fontSize: 11 }}>
-        {clock(event.at)}
-      </span>
-      <span
-        className="mono"
-        style={{
-          color: colour,
-          fontSize: 9.5,
-          letterSpacing: '.08em',
-          fontWeight: 600,
-          width: 58,
-          flex: 'none',
-        }}
-      >
-        {label}
-      </span>
-      <span className="ellipsis" style={{ flex: 1, fontSize: 12.5 }}>
-        {event.title}
-        {event.kind === 'think' && event.subtitle && (
-          <span style={{ color: 'var(--faint)' }}> · {event.subtitle}</span>
-        )}
-      </span>
-      <span className="num" style={{ flex: 'none', minWidth: 56 }}>
-        {tokens(event.cost)}
-      </span>
     </div>
   );
 }

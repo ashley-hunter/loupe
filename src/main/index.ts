@@ -145,6 +145,20 @@ async function capture(win: BrowserWindow): Promise<void> {
       console.log('[shot]', typed);
       await new Promise((r) => setTimeout(r, 3500));
     }
+    if (process.env['SHOT_CLICK']) {
+      const [sel, nth] = process.env['SHOT_CLICK'].split('#');
+      const clicked = (await win.webContents.executeJavaScript(`
+        (() => {
+          const all = [...document.querySelectorAll(${JSON.stringify(sel)})];
+          const el = all[${JSON.stringify(Number(nth ?? 0))}];
+          if (!el) return 'NOT FOUND: ' + ${JSON.stringify(sel)} + ' (' + all.length + ' present)';
+          el.click();
+          return 'clicked ' + ${JSON.stringify(sel)};
+        })()
+      `)) as string;
+      console.log('[shot]', clicked);
+      await new Promise((r) => setTimeout(r, 900));
+    }
     if (process.env['SHOT_SCROLL'] === 'bottom') {
       await win.webContents.executeJavaScript(`
         (() => {

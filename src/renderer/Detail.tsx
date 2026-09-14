@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Tabs } from '@base-ui-components/react/tabs';
-import { cacheHitRate, newTokens, type Event, type SessionDetail } from '../shared/model.js';
+import { cacheHitRate, newTokens, type SessionDetail } from '../shared/model.js';
 import { CacheTab, FilesTab, SubagentsTab, ToolsTab } from './DetailTabs.js';
-import { KIND } from './kinds.js';
 import { BackButton } from './ui/BackButton.js';
+import { EventRow } from './ui/EventRow.js';
+import { Inspector } from './ui/Inspector.js';
 import { Stat } from './ui/Stat.js';
 import { StatStrip } from './ui/StatStrip.js';
-import { BLANK, clock, duration, model, percent, tokens } from './format.js';
+import { BLANK, duration, model, percent, tokens } from './format.js';
 
 export function Detail({
   session,
@@ -135,7 +136,7 @@ export function Detail({
         <Tabs.Panel value="timeline" style={{ flex: 1, minHeight: 0, display: 'flex' }}>
           <div ref={listRef} style={{ flex: 1, minWidth: 0, overflow: 'auto' }}>
             {session.events.map((e) => (
-              <Row
+              <EventRow
                 key={e.id}
                 event={e}
                 active={e.id === selected}
@@ -182,198 +183,5 @@ function Tab({ value, label, disabled }: { value: string; label: string; disable
     >
       {label}
     </Tabs.Tab>
-  );
-}
-
-function Row({ event, active, onSelect }: { event: Event; active: boolean; onSelect: () => void }) {
-  const [label, colour] = KIND[event.kind];
-  return (
-    <div
-      onClick={onSelect}
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: 10,
-        minHeight: 30,
-        padding: `5px 12px 5px ${12 + event.depth * 18}px`,
-        background: active ? 'var(--accentSoft)' : 'transparent',
-        borderBottom: '1px solid var(--lineSoft)',
-        borderLeft: active ? '2px solid var(--accent)' : '2px solid transparent',
-      }}
-    >
-      <span className="mono" style={{ color: 'var(--faint)', fontSize: 11 }}>
-        {clock(event.at)}
-      </span>
-      <span
-        className="mono"
-        style={{
-          color: colour,
-          fontSize: 9.5,
-          letterSpacing: '.08em',
-          fontWeight: 600,
-          width: 58,
-          flex: 'none',
-        }}
-      >
-        {label}
-      </span>
-      <span
-        style={{
-          flex: 1,
-          minWidth: 0,
-          overflow: 'hidden',
-          textOverflow: 'ellipsis',
-          whiteSpace: 'nowrap',
-        }}
-      >
-        {event.title}
-        {event.kind === 'think' && event.subtitle && (
-          <span style={{ color: 'var(--faint)' }}> · {event.subtitle}</span>
-        )}
-        {event.failed && <span style={{ color: 'var(--err)' }}> · failed</span>}
-      </span>
-      <span
-        className="num"
-        style={{
-          color: event.cost === null ? 'var(--faint)' : 'var(--dim)',
-          flex: 'none',
-          minWidth: 56,
-        }}
-        title={
-          event.cost === null
-            ? 'Could not be measured — the cached prefix was rebuilt, or this is the last request.'
-            : event.sharedCost
-              ? 'This request made several tool calls. The figure covers all of them and must not be summed.'
-              : 'Tokens this added to the context.'
-        }
-      >
-        {event.sharedCost ? '⊕ ' : ''}
-        {tokens(event.cost)}
-      </span>
-    </div>
-  );
-}
-
-function Inspector({ event, collapseAbove }: { event: Event | null; collapseAbove: number }) {
-  const [expanded, setExpanded] = useState(false);
-  useEffect(() => {
-    setExpanded(false);
-  }, [event?.id]);
-
-  // Roughly four characters per token — enough to decide whether to collapse.
-  const big =
-    collapseAbove > 0 && event?.body !== undefined && event.body.length / 4 > collapseAbove;
-  const collapsed = big && !expanded;
-
-  return (
-    <div
-      style={{
-        width: 340,
-        flex: 'none',
-        borderLeft: '1px solid var(--line)',
-        overflow: 'auto',
-        padding: 14,
-        background: 'var(--panel)',
-      }}
-    >
-      {!event && <div style={{ color: 'var(--faint)' }}>Select an event.</div>}
-      {event && (
-        <>
-          <div
-            className="mono"
-            style={{
-              color: KIND[event.kind][1],
-              fontSize: 9.5,
-              letterSpacing: '.08em',
-              fontWeight: 600,
-            }}
-          >
-            {KIND[event.kind][0]}
-          </div>
-          <div
-            className="selectable"
-            style={{ margin: '6px 0 12px', fontSize: 13, lineHeight: 1.45 }}
-          >
-            {event.title}
-          </div>
-
-          <Field label="Time" value={clock(event.at)} />
-          {event.subtitle && <Field label="Tool" value={event.subtitle} />}
-          <Field
-            label="Added to context"
-            value={event.cost === null ? `${BLANK} not measurable` : `${tokens(event.cost)} tokens`}
-          />
-          {event.sharedCost && (
-            <div style={{ color: 'var(--warn)', fontSize: 11.5, margin: '8px 0', lineHeight: 1.4 }}>
-              Shared with the other tool calls in this request. Correct for each, but do not add
-              them together.
-            </div>
-          )}
-
-          {event.body && (
-            <>
-              <div className="eyebrow" style={{ margin: '14px 0 5px' }}>
-                Content
-              </div>
-              <pre
-                className="selectable mono"
-                style={{
-                  margin: 0,
-                  padding: 9,
-                  fontSize: 11.5,
-                  lineHeight: 1.45,
-                  background: 'var(--codeBg)',
-                  border: '1px solid var(--line)',
-                  borderRadius: 5,
-                  whiteSpace: 'pre-wrap',
-                  wordBreak: 'break-word',
-                  maxHeight: collapsed ? 96 : 420,
-                  overflow: 'auto',
-                }}
-              >
-                {event.body}
-              </pre>
-              {big && (
-                <button
-                  onClick={() => {
-                    setExpanded((v) => !v);
-                  }}
-                  style={{
-                    border: 'none',
-                    background: 'none',
-                    color: 'var(--accent)',
-                    fontSize: 11.5,
-                    padding: '5px 0',
-                  }}
-                >
-                  {collapsed
-                    ? `Show all ~${Math.round(event.body.length / 4 / 1000)}k tokens`
-                    : 'Collapse'}
-                </button>
-              )}
-            </>
-          )}
-        </>
-      )}
-    </div>
-  );
-}
-
-function Field({ label, value }: { label: string; value: string }) {
-  return (
-    <div
-      style={{
-        display: 'flex',
-        justifyContent: 'space-between',
-        gap: 10,
-        padding: '3px 0',
-        fontSize: 12,
-      }}
-    >
-      <span style={{ color: 'var(--faint)' }}>{label}</span>
-      <span className="selectable" style={{ textAlign: 'right' }}>
-        {value}
-      </span>
-    </div>
   );
 }
