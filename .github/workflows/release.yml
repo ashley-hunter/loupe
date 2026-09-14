@@ -27,13 +27,6 @@ jobs:
               release/*.zip
               release/*.blockmap
               release/latest-mac.yml
-          - os: windows-latest
-            name: Windows
-            platform: --win
-            artifacts: |
-              release/*.exe
-              release/*.blockmap
-              release/latest.yml
           - os: ubuntu-latest
             name: Linux
             platform: --linux
