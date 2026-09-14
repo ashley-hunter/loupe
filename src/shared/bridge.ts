@@ -30,6 +30,10 @@ export interface LoupeBridge {
   onLive(fn: (detail: SessionDetail | null) => void): () => void;
   /** Expensive things that just happened in the running Session. */
   onAlerts(fn: (alerts: Alert[]) => void): () => void;
+  /** Every Alert still on record, newest first. Survives a restart. */
+  alertHistory(): Promise<Alert[]>;
+  /** A native notification was clicked; open this Alert's evidence. */
+  onOpenAlert(fn: (alert: Alert) => void): () => void;
   usage(): Promise<UsageSample | null>;
   /** Change how often the Allowance is polled. Clamped to the rate-limit floor. */
   setPollInterval(minutes: number): Promise<void>;

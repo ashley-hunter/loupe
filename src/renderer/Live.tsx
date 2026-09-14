@@ -21,12 +21,14 @@ export function Live({
   alerts,
   onDismissAlerts,
   onOpen,
+  onOpenAlert,
   collapseAbove,
 }: {
   usage: UsageSample | null;
   alerts: Alert[];
   onDismissAlerts: () => void;
   onOpen: (detail: SessionDetail) => void;
+  onOpenAlert: (alert: Alert) => void;
   collapseAbove: number;
 }) {
   const [session, setSession] = useState<SessionDetail | null>(null);
@@ -90,7 +92,9 @@ export function Live({
         onOpen(session);
       }}
     >
-      {alerts.length > 0 && <Alerts alerts={alerts} onDismiss={onDismissAlerts} />}
+      {alerts.length > 0 && (
+        <Alerts alerts={alerts} onDismiss={onDismissAlerts} onOpen={onOpenAlert} />
+      )}
 
       <StatStrip>
         <Stat label="New tokens" value={tokens(newTokens(session.usage))} />
@@ -165,7 +169,15 @@ export function Live({
  * What just cost a lot. Shown here rather than as a system notification when
  * the app is already in front of you — the main process decides which.
  */
-function Alerts({ alerts, onDismiss }: { alerts: Alert[]; onDismiss: () => void }) {
+function Alerts({
+  alerts,
+  onDismiss,
+  onOpen,
+}: {
+  alerts: Alert[];
+  onDismiss: () => void;
+  onOpen: (alert: Alert) => void;
+}) {
   return (
     <div
       className="alert-banner"
@@ -194,12 +206,31 @@ function Alerts({ alerts, onDismiss }: { alerts: Alert[]; onDismiss: () => void 
         </button>
       </div>
       {alerts.slice(0, 3).map((a) => (
-        <div key={a.id} style={{ fontSize: 12, lineHeight: 1.5 }}>
+        <div key={a.id} style={{ fontSize: 12, lineHeight: 1.5, marginBottom: 3 }}>
           <span className="mono" style={{ color: 'var(--faint)', fontSize: 10.5 }}>
             {clock(a.at)}
           </span>{' '}
           <span style={{ fontWeight: 600 }}>{a.title}</span>{' '}
           <span style={{ color: 'var(--dim)' }}>{a.detail}</span>
+          {/* Which Session this was, and a way into the evidence. Without these
+              an Alert says something happened and leaves you to find it. */}
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 7, marginTop: 1 }}>
+            <span className="ellipsis" style={{ color: 'var(--dim)', fontSize: 11.5 }}>
+              {a.sessionName}
+            </span>
+            <span className="mono" style={{ color: 'var(--faint)', fontSize: 10.5, flex: 'none' }}>
+              {a.project}
+            </span>
+            <button
+              className="ghost-button"
+              style={{ flex: 'none' }}
+              onClick={() => {
+                onOpen(a);
+              }}
+            >
+              {a.tab === 'cache' ? 'Why?' : 'Show me'}
+            </button>
+          </div>
         </div>
       ))}
       {alerts.length > 3 && (

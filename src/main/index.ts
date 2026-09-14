@@ -11,8 +11,10 @@ import {
   runSearch,
 } from './catalogue.js';
 import { detectAlerts } from './alerts.js';
+import { readAlerts, recordAlerts } from './alert-log.js';
 import { watchLive } from './live.js';
 import { readSamples, readUsage, startPolling, type Poller } from './usage.js';
+import type { SessionDetail } from '../shared/model.js';
 import { checkForUpdates, installUpdate, startUpdates, updateState } from './updates.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -195,42 +197,83 @@ ipcMain.handle('loupe:search', (_e, query: string, kind: string) =>
   runSearch(query, kind as Parameters<typeof runSearch>[1]),
 );
 
-// The live watcher runs only while the Live screen is open.
+/**
+ * The live watcher runs for as long as the app does, not just while the Live
+ * screen is open.
+ *
+ * It used to start and stop with that screen, which meant an Alert could only
+ * be raised while you were already watching the thing it would have told you
+ * about. A notification you can only receive when you do not need it is not a
+ * notification.
+ */
 let stopLive: (() => void) | null = null;
+
+/** The most recent reading, so a Live screen opening mid-session is not blank. */
+let latestLive: SessionDetail | null = null;
 
 /**
  * Ids already alerted on. The live Session is re-parsed on every write, so
  * without this the same expensive read would be announced again each time.
+ * Seeded from the log, because a Session outlives a single app run.
  */
 const alerted = new Set<string>();
 
-ipcMain.handle('loupe:live-start', (event) => {
+const broadcast = (channel: string, payload: unknown): void => {
+  for (const w of BrowserWindow.getAllWindows()) {
+    if (!w.webContents.isDestroyed()) w.webContents.send(channel, payload);
+  }
+};
+
+function beginWatchingLive(): void {
   stopLive?.();
   stopLive = watchLive((detail) => {
-    if (event.sender.isDestroyed()) return;
-    event.sender.send('loupe:live', detail);
+    latestLive = detail;
+    broadcast('loupe:live', detail);
     if (!detail) return;
 
     const fresh = detectAlerts(detail, alerted);
     for (const alert of fresh) alerted.add(alert.id);
     if (fresh.length === 0) return;
 
-    event.sender.send('loupe:alerts', fresh);
+    void recordAlerts(fresh);
+    broadcast('loupe:alerts', fresh);
 
     // A native notification only when the app is not already in front of you;
     // the renderer shows a banner otherwise.
-    const window = BrowserWindow.fromWebContents(event.sender);
+    const [window] = BrowserWindow.getAllWindows();
     if (window?.isFocused() === true || !Notification.isSupported()) return;
     for (const alert of fresh.slice(0, 2)) {
-      new Notification({ title: alert.title, body: `${alert.project} · ${alert.detail}` }).show();
+      const note = new Notification({
+        title: alert.title,
+        // Which Session, not just which project: a project can have several
+        // running at once, and the Session name is the prompt you recognise.
+        body: `${alert.sessionName}\n${alert.project} · ${alert.detail}`,
+      });
+      // Clicking it should land on the evidence, not merely raise the window.
+      note.on('click', () => {
+        const [w] = BrowserWindow.getAllWindows();
+        if (!w) return;
+        if (w.isMinimized()) w.restore();
+        w.focus();
+        w.webContents.send('loupe:open-alert', alert);
+      });
+      note.show();
     }
   });
+}
+
+/** Hand the current reading straight to a Live screen that has just mounted. */
+ipcMain.handle('loupe:live-start', (event) => {
+  if (!event.sender.isDestroyed()) event.sender.send('loupe:live', latestLive);
 });
 
-ipcMain.handle('loupe:live-stop', () => {
-  stopLive?.();
-  stopLive = null;
-});
+/**
+ * Nothing to stop any more: the watcher is owned by the app, not the screen.
+ * Kept so an older renderer bundle calling it is not an error.
+ */
+ipcMain.handle('loupe:live-stop', () => undefined);
+
+ipcMain.handle('loupe:alert-history', () => readAlerts());
 /**
  * The current Allowance, or the most recent recorded reading when the endpoint
  * is unreachable. A recorded sample carries its own timestamp, so the UI can say
@@ -279,6 +322,12 @@ void app.whenReady().then(() => {
   createWindow();
 
   // Reads consumption without running inference: no tokens, no allowance.
+  // Alerts already raised in an earlier run must not be announced again.
+  void readAlerts().then((past) => {
+    for (const a of past) alerted.add(a.id);
+    beginWatchingLive();
+  });
+
   poller = startPolling((sample) => {
     for (const w of BrowserWindow.getAllWindows()) w.webContents.send('loupe:usage-sample', sample);
   });

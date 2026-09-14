@@ -28,6 +28,12 @@ contextBridge.exposeInMainWorld('loupe', {
     ipcRenderer.on('loupe:usage-sample', handler);
     return () => ipcRenderer.off('loupe:usage-sample', handler);
   },
+  alertHistory: () => ipcRenderer.invoke('loupe:alert-history'),
+  onOpenAlert: (fn) => {
+    const handler = (_e, alert) => fn(alert);
+    ipcRenderer.on('loupe:open-alert', handler);
+    return () => ipcRenderer.off('loupe:open-alert', handler);
+  },
   updateState: () => ipcRenderer.invoke('loupe:update-state'),
   checkForUpdates: () => ipcRenderer.invoke('loupe:update-check'),
   installUpdate: () => ipcRenderer.invoke('loupe:update-install'),

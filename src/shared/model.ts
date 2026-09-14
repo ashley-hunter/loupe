@@ -277,16 +277,39 @@ export type AlertKind = 'oversized-result' | 'prefix-rebuilt';
  * Raised after the fact — Transcripts are written once a Request completes — so
  * an Alert reports what was spent, never what to avoid.
  */
+/**
+ * One measured fact behind an Alert.
+ *
+ * An Alert says a thing happened; the evidence is what it is standing on. For a
+ * rebuilt prefix that is each rebuild and the results that grew the context
+ * before it, because there is rarely a single culprit and pretending otherwise
+ * would be inventing one.
+ */
+export interface AlertEvidence {
+  at: string;
+  label: string;
+  tokens: number | null;
+  /** Set when this line corresponds to an Event, so it can be selected. */
+  eventId?: string;
+}
+
 export interface Alert {
   id: string;
   kind: AlertKind;
   sessionId: SessionId;
   sessionName: string;
   project: string;
+  /** Where the Transcript is, so the Session can be reopened from an Alert. */
+  sessionPath: string;
   at: string;
   title: string;
   detail: string;
   tokens: number;
+  /** The tab that shows this Alert's evidence when the Session is opened. */
+  tab: 'timeline' | 'cache';
+  /** The Event to select on arrival, when one Event is the whole story. */
+  eventId?: string;
+  evidence: AlertEvidence[];
 }
 
 export type RecommendationKind = 'unused-mcp' | 'model-routing';

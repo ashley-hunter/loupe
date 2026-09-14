@@ -1,5 +1,6 @@
 import {
   Activity,
+  Bell,
   ChartColumn,
   Database,
   Folder,
@@ -27,6 +28,7 @@ import { Palette } from './Palette.js';
 import { Search } from './Search.js';
 import { Projects } from './Projects.js';
 import { Settings } from './Settings.js';
+import { Alerts as AlertsScreen } from './Alerts.js';
 import { Sessions } from './Sessions.js';
 import { duration } from './format.js';
 import type { Prefs } from '../shared/prefs.js';
@@ -43,10 +45,11 @@ type Screen =
   | { at: 'insights' }
   | { at: 'analytics' }
   | { at: 'live' }
+  | { at: 'alerts' }
   | { at: 'search' }
   | { at: 'projects' }
   | { at: 'settings' }
-  | { at: 'detail'; session: SessionDetail; tab: string };
+  | { at: 'detail'; session: SessionDetail; tab: string; eventId?: string };
 
 /** Sidebar entries. `ready` marks the ones that have their data yet. */
 interface NavItem {
@@ -64,6 +67,7 @@ const NAV: NavItem[] = [
   { id: 'sessions', label: 'Sessions', icon: List, ready: true },
   { id: 'search', label: 'Search', icon: SearchIcon, ready: true },
   { id: 'live', label: 'Live', icon: Activity, ready: true },
+  { id: 'alerts', label: 'Alerts', icon: Bell, ready: true },
   { id: 'analytics', label: 'Analytics', icon: ChartColumn, ready: true },
   { id: 'insights', label: 'Insights', icon: Lightbulb, ready: true },
   { id: 'projects', label: 'Projects', icon: Folder, ready: true },
@@ -94,11 +98,25 @@ const SCREEN_FOR: Record<string, Screen> = {
   sessions: { at: 'sessions' },
   search: { at: 'search' },
   live: { at: 'live' },
+  alerts: { at: 'alerts' },
   analytics: { at: 'analytics' },
   insights: { at: 'insights' },
   projects: { at: 'projects' },
   cache: { at: 'cache' },
   settings: { at: 'settings' },
+};
+
+/**
+ * How recent an Alert has to be to still be worth a banner. Matches the window
+ * the detectors themselves use, so the banner and the notification agree.
+ */
+const RECENT_ALERT_MS = 15 * 60_000;
+
+/** Newest first, without repeating an Alert already held. */
+const merge = (fresh: Alert[], current: Alert[]): Alert[] => {
+  const byId = new Map(current.map((a) => [a.id, a]));
+  for (const a of fresh) byId.set(a.id, a);
+  return [...byId.values()].sort((a, b) => Date.parse(b.at) - Date.parse(a.at)).slice(0, 20);
 };
 
 /** The design's icon size and weight, used everywhere an icon appears. */
@@ -156,13 +174,20 @@ export function App() {
   }, []);
 
   // Alerts arrive whenever the Live watcher is running, whatever screen is open.
-  useEffect(
-    () =>
-      window.loupe.onAlerts((fresh) => {
-        setAlerts((current) => [...fresh, ...current].slice(0, 20));
-      }),
-    [],
-  );
+  //
+  // The history is read on mount as well as subscribed to, because the watcher
+  // starts in the main process before this window has finished loading: an
+  // Alert raised in that gap would otherwise be broadcast to nobody and only
+  // ever be seen on the Alerts screen.
+  useEffect(() => {
+    void window.loupe.alertHistory().then((all) => {
+      const recent = all.filter((a) => Date.now() - Date.parse(a.at) < RECENT_ALERT_MS);
+      setAlerts((current) => merge(recent, current));
+    });
+    return window.loupe.onAlerts((fresh) => {
+      setAlerts((current) => merge(fresh, current));
+    });
+  }, []);
 
   // Preferences are stored in the renderer, so the poller has to be told.
   useEffect(() => {
@@ -184,9 +209,26 @@ export function App() {
     });
   }, []);
 
+  /** Land on the evidence for an Alert: its Session, its tab, its Event. */
+  const openAlert = useCallback((alert: Alert) => {
+    void window.loupe.session(alert.sessionPath).then((detail) => {
+      if (!detail) return;
+      setScreen({
+        at: 'detail',
+        session: detail,
+        tab: alert.tab,
+        ...(alert.eventId !== undefined ? { eventId: alert.eventId } : {}),
+      });
+    });
+  }, []);
+
   const back = useCallback(() => {
     setScreen({ at: 'sessions' });
   }, []);
+
+  // Clicking the native notification lands on that Alert's evidence.
+  useEffect(() => window.loupe.onOpenAlert(openAlert), [openAlert]);
+
   const go = useCallback((id: string) => {
     setScreen(SCREEN_FOR[id] ?? { at: 'sessions' });
   }, []);
@@ -344,6 +386,7 @@ export function App() {
           onDetail={(session) => {
             setScreen({ at: 'detail', session, tab: 'timeline' });
           }}
+          onOpenAlert={openAlert}
           onDismissAlerts={() => {
             setAlerts([]);
           }}
@@ -423,6 +466,7 @@ interface ScreenProps {
   onOpen: (s: SessionSummary, tab?: Finding['tab']) => void;
   onBack: () => void;
   onDetail: (detail: SessionDetail) => void;
+  onOpenAlert: (alert: Alert) => void;
   onDismissAlerts: () => void;
 }
 
@@ -443,9 +487,13 @@ function CurrentScreen(p: ScreenProps) {
         onDismissAlerts={p.onDismissAlerts}
         usage={p.usage}
         onOpen={p.onDetail}
+        onOpenAlert={p.onOpenAlert}
         collapseAbove={p.prefs.collapseAbove}
       />
     );
+  }
+  if (screen.at === 'alerts') {
+    return <AlertsScreen onOpen={p.onOpenAlert} />;
   }
   if (screen.at === 'settings') {
     return <Settings theme={p.theme} onTheme={p.onTheme} prefs={p.prefs} onPrefs={p.onPrefs} />;
@@ -459,6 +507,7 @@ function CurrentScreen(p: ScreenProps) {
         session={screen.session}
         onBack={p.onBack}
         initialTab={screen.tab}
+        {...(screen.eventId !== undefined ? { initialEventId: screen.eventId } : {})}
         collapseAbove={p.prefs.collapseAbove}
       />
     );

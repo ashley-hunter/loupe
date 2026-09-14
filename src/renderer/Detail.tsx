@@ -13,16 +13,21 @@ export function Detail({
   session,
   onBack,
   initialTab = 'timeline',
+  initialEventId,
   collapseAbove = 2000,
 }: {
   session: SessionDetail;
   onBack: () => void;
   /** Which tab to land on — set when arriving from a Finding's evidence link. */
   initialTab?: string;
+  /** Which Event to select on arrival — set when arriving from an Alert. */
+  initialEventId?: string;
   /** Tool output larger than this stays collapsed. 0 never collapses. */
   collapseAbove?: number;
 }) {
-  const [selected, setSelected] = useState<string | null>(session.events[0]?.id ?? null);
+  const [selected, setSelected] = useState<string | null>(
+    initialEventId ?? session.events[0]?.id ?? null,
+  );
   const listRef = useRef<HTMLDivElement>(null);
 
   const event = useMemo(

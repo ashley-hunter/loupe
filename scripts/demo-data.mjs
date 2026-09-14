@@ -149,7 +149,7 @@ function transcript({ project, title, model: baseModel, requests, traits, starte
 
     // The prefix survives but moves from read to written: the largest single
     // cost in real Transcripts, and not a mistake.
-    if (has('reanchor') && i > 3 && i % 7 === 0) {
+    if (has('reanchor') && i > 2 && i % 3 === 0) {
       read = Math.round(prefix * 0.3);
       write = Math.round(prefix * 0.55);
     }
@@ -256,13 +256,26 @@ for (const [project, title, model, requests, traits] of SESSIONS) {
   await mkdir(dir, { recursive: true });
 
   const startedAt = now - offset;
-  const { lines, endedAt } = transcript({ project, title, model, requests, traits, startedAt });
+  let { lines, endedAt } = transcript({ project, title, model, requests, traits, startedAt });
+
+  // The newest Session is made to be still running: its last Event a few
+  // minutes ago, so the Live screen has something to follow and the Alert
+  // detectors, which only fire on recent moments, actually fire.
+  if (spans.length === 0) {
+    const delta = now - 4 * 60_000 - endedAt;
+    lines = lines.map((l) => {
+      const r = JSON.parse(l);
+      if (r.timestamp) r.timestamp = iso(Date.parse(r.timestamp) + delta);
+      return JSON.stringify(r);
+    });
+    endedAt += delta;
+  }
 
   const path = join(dir, `demo-${project}-${offset}.jsonl`);
   await writeFile(path, lines.join('\n') + '\n');
   // The Sessions list sorts on mtime, so it has to match the Session's own clock.
   await utimes(path, new Date(endedAt), new Date(endedAt));
-  spans.push([startedAt, endedAt]);
+  spans.push([Math.min(startedAt, endedAt), endedAt]);
 
   // Sessions get older going down the list, with an irregular gap between them.
   offset += between(3, 26) * 3600_000 + between(0, 59) * 60_000 + (rand() < 0.3 ? DAY : 0);

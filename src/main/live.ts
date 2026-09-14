@@ -1,5 +1,6 @@
 import { watch, type FSWatcher } from 'node:fs';
 import { stat } from 'node:fs/promises';
+import { basename } from 'node:path';
 import type { SessionDetail } from '../shared/model.js';
 import { TRANSCRIPT_ROOT, findTranscripts, loadSession } from './catalogue.js';
 
@@ -75,7 +76,11 @@ export function watchLive(
   try {
     watcher = watch(root, { recursive: true }, (_event, filename) => {
       // Only Transcripts matter; Claude Code writes plenty of other files.
-      if (filename && !filename.endsWith('.jsonl')) return;
+      // Dotfiles are excluded too: this app's own caches sit next to the
+      // Transcripts under LOUPE_ROOT, and the alert log is itself a .jsonl, so
+      // without this, recording an Alert would trigger the re-parse that
+      // records the next one.
+      if (filename && (!filename.endsWith('.jsonl') || basename(filename).startsWith('.'))) return;
       schedule();
     });
   } catch {
