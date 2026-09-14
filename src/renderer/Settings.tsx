@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 import { TRANSCRIPT_ROOT_LABEL, type Prefs } from '../shared/prefs.js';
 import type { UpdateState } from '../main/updates.js';
-import { savePrefs } from './prefs.js';
 import { Chips } from './ui/Chips.js';
 import { TopBar } from './ui/TopBar.js';
 
@@ -25,11 +24,6 @@ export function Settings({
   prefs: Prefs;
   onPrefs: (p: Prefs) => void;
 }) {
-  const setPrefs = (p: Prefs): void => {
-    savePrefs(p);
-    onPrefs(p);
-  };
-
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
       <TopBar title="Settings" />
@@ -63,7 +57,7 @@ export function Settings({
                   ['0', 'Never'],
                 ]}
                 onChange={(v) => {
-                  setPrefs({ ...prefs, collapseAbove: Number(v) });
+                  onPrefs({ ...prefs, collapseAbove: Number(v) });
                 }}
               />
             </Row>
@@ -87,7 +81,7 @@ export function Settings({
                   ['30', '30 min'],
                 ]}
                 onChange={(v) => {
-                  setPrefs({ ...prefs, pollMinutes: Number(v) });
+                  onPrefs({ ...prefs, pollMinutes: Number(v) });
                 }}
               />
             </Row>

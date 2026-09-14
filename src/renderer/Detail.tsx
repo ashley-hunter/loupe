@@ -1,9 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Tabs } from '@base-ui-components/react/tabs';
 import { cacheHitRate, newTokens, type SessionDetail } from '../shared/model.js';
 import { CacheTab, FilesTab, SubagentsTab, ToolsTab } from './DetailTabs.js';
 import { BackButton } from './ui/BackButton.js';
+import { Conversation } from './Conversation.js';
 import { EventRow } from './ui/EventRow.js';
+import { VirtualRows } from './ui/VirtualRows.js';
 import { Inspector } from './ui/Inspector.js';
 import { Stat } from './ui/Stat.js';
 import { StatStrip } from './ui/StatStrip.js';
@@ -28,26 +30,28 @@ export function Detail({
   const [selected, setSelected] = useState<string | null>(
     initialEventId ?? session.events[0]?.id ?? null,
   );
-  const listRef = useRef<HTMLDivElement>(null);
 
-  const event = useMemo(
-    () => session.events.find((e) => e.id === selected) ?? null,
+  const selectedIndex = useMemo(
+    () => session.events.findIndex((e) => e.id === selected),
     [session.events, selected],
   );
+  const event = selectedIndex === -1 ? null : (session.events[selectedIndex] ?? null);
 
   // j/k move through the Timeline, as in the design.
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
       const tag = (e.target as HTMLElement | null)?.tagName ?? '';
       if (tag === 'INPUT' || tag === 'TEXTAREA') return;
-      if (e.key !== 'j' && e.key !== 'k' && e.key !== 'Escape') return;
+      const down = e.key === 'j' || e.key === 'ArrowDown';
+      const up = e.key === 'k' || e.key === 'ArrowUp';
+      if (!down && !up && e.key !== 'Escape') return;
       if (e.key === 'Escape') {
         onBack();
         return;
       }
       e.preventDefault();
       const i = session.events.findIndex((x) => x.id === selected);
-      const next = e.key === 'j' ? Math.min(session.events.length - 1, i + 1) : Math.max(0, i - 1);
+      const next = down ? Math.min(session.events.length - 1, i + 1) : Math.max(0, i - 1);
       setSelected(session.events[next]?.id ?? null);
     };
     window.addEventListener('keydown', onKey);
@@ -79,12 +83,6 @@ export function Detail({
           label="Active"
           value={duration(session.activeMs)}
           hint="Time actually worked — gaps longer than five minutes are excluded."
-        />
-        <Stat
-          label="Span"
-          value={duration(session.spanMs)}
-          hint="First event to last, including idle time. A resumed session can span days."
-          tone="var(--dim)"
         />
         <Stat label="Prompts" value={String(session.prompts)} />
         <Stat label="Requests" value={String(session.requestCount)} />
@@ -131,6 +129,7 @@ export function Detail({
             background: 'var(--panel)',
           }}
         >
+          <Tab value="conversation" label={`Conversation · ${String(session.prompts)}`} />
           <Tab value="timeline" label={`Timeline · ${session.events.length}`} />
           <Tab value="cache" label={`Cache · ${session.invalidations.length}`} />
           <Tab value="files" label={`Files · ${fileCount}`} />
@@ -139,24 +138,30 @@ export function Detail({
         </Tabs.List>
 
         <Tabs.Panel value="timeline" style={{ flex: 1, minHeight: 0, display: 'flex' }}>
-          <div ref={listRef} style={{ flex: 1, minWidth: 0, overflow: 'auto' }}>
-            {session.events.map((e) => (
+          <VirtualRows
+            items={session.events}
+            rowHeight={30}
+            scrollTo={selectedIndex}
+            empty={
+              <div style={{ padding: 40, textAlign: 'center', color: 'var(--faint)' }}>
+                This transcript has no events.
+              </div>
+            }
+            render={(e) => (
               <EventRow
-                key={e.id}
                 event={e}
                 active={e.id === selected}
                 onSelect={() => {
                   setSelected(e.id);
                 }}
               />
-            ))}
-            {session.events.length === 0 && (
-              <div style={{ padding: 40, textAlign: 'center', color: 'var(--faint)' }}>
-                This transcript has no events.
-              </div>
             )}
-          </div>
+          />
           <Inspector event={event} collapseAbove={collapseAbove} />
+        </Tabs.Panel>
+
+        <Tabs.Panel value="conversation" style={{ flex: 1, minHeight: 0, display: 'flex' }}>
+          <Conversation session={session} />
         </Tabs.Panel>
 
         <Tabs.Panel value="cache" style={PANEL}>

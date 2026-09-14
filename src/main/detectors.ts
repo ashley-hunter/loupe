@@ -247,6 +247,60 @@ const thinkingHeavy: Detector = (session) => {
   ];
 };
 
+/** The program a command runs, with any leading `cd ... &&` stripped. */
+function program(command: string): string {
+  const withoutCd = command.replace(/^cd\s+(?:'[^']*'|"[^"]*"|\S+)\s*(?:&&\s*)?/, '');
+  const first = (withoutCd.trim() || command.trim()).split(/\s+/)[0] ?? '';
+  return first.replace(/^.*\//, '').slice(0, 24);
+}
+
+/**
+ * Command output filling the context, grouped by the program that produced it.
+ *
+ * Measured across the Transcripts here, command output is 62.5% of everything
+ * that grows a context — more than twice what file reads add — but it does it
+ * by volume rather than by size: 24,440 outputs at a median of 196 tokens, and
+ * only five above 20k. Naming individual commands would therefore find almost
+ * nothing, so this groups by program: what you would actually change is how a
+ * tool is invoked, not one invocation of it.
+ */
+const noisyCommands: Detector = (session) => {
+  const byProgram = new Map<string, { runs: number; cost: number }>();
+  for (const e of session.events) {
+    if (e.kind !== 'bash' || e.cost === null || e.cost <= 0) continue;
+    const name = program(e.title);
+    if (!name) continue;
+    const seen = byProgram.get(name) ?? { runs: 0, cost: 0 };
+    seen.runs++;
+    seen.cost += e.cost;
+    byProgram.set(name, seen);
+  }
+
+  return [...byProgram.entries()]
+    .map(([name, c]) => ({ name, ...c }))
+    .filter((c) => c.cost >= WORTH_REPORTING)
+    .sort((a, b) => b.cost - a.cost)
+    .map((c) => ({
+      id: `${session.id}:bash:${c.name}`,
+      kind: 'noisy-command' as const,
+      category: 'context' as const,
+      sessionId: session.id,
+      sessionPath: session.path,
+      sessionName: session.name,
+      project: session.project,
+      tab: 'tools' as const,
+      recoverable: c.cost,
+      explanation:
+        'Command output goes into the context in full, and is the largest single ' +
+        'source of growth. Quietening a command, piping it through head, or writing ' +
+        'it to a file and reading back only the part that matters keeps it out.',
+      text: `${c.name} produced ${fmt(c.cost)} tokens of output over ${String(c.runs)} ${
+        c.runs === 1 ? 'run' : 'runs'
+      }`,
+      evidence: `${String(c.runs)} runs · ${fmt(Math.round(c.cost / c.runs))} each on average`,
+    }));
+};
+
 /** The same page fetched more than once in a Session. */
 const webRepeats: Detector = (session) => {
   const fetches = new Map<string, { runs: number; cost: number }>();
@@ -283,6 +337,7 @@ const webRepeats: Detector = (session) => {
 
 export const DETECTORS: Detector[] = [
   reanchoring,
+  noisyCommands,
   duplicateReads,
   midSessionModelChange,
   retryChurn,

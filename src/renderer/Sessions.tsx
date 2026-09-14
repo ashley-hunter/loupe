@@ -1,10 +1,33 @@
-import { useMemo, useState } from 'react';
-import { cacheHitRate, newTokens, type SessionSummary } from '../shared/model.js';
+import { Fragment, useMemo, useState } from 'react';
+import { cacheHitRate, newTokens, totalNewTokens, type SessionSummary } from '../shared/model.js';
+import { groupBy } from '../shared/group.js';
+import { rowProps, useRowNav } from './useRowNav.js';
 import { BLANK, duration, model, percent, tokens, when } from './format.js';
 import { useWidth } from './useWidth.js';
 import { Empty } from './ui/Empty.js';
+import { GroupHeader } from './ui/GroupHeader.js';
 import { TopBar } from './ui/TopBar.js';
 import { Tooltip } from './ui/Tooltip.js';
+
+/**
+ * What a group's band says about the sessions under it.
+ *
+ * Counting worktrees separately matters: "3 sessions across 2 worktrees" is the
+ * answer to where work came from, where "3 sessions" alone hides that half of
+ * it happened on a branch checked out beside the repo.
+ */
+function summarise(group: SessionSummary[]): string {
+  const total = group.reduce((n, s) => n + totalNewTokens(s), 0);
+  const active = group.reduce((n, s) => n + s.activeMs, 0);
+  const trees = new Set(group.map((s) => s.project)).size;
+  const parts = [
+    `${String(group.length)} ${group.length === 1 ? 'session' : 'sessions'}`,
+    ...(trees > 1 ? [`${String(trees)} worktrees`] : []),
+    `${tokens(total)} new`,
+    duration(active),
+  ];
+  return parts.join('  ·  ');
+}
 
 type SortKey =
   | 'name'
@@ -68,7 +91,7 @@ const VALUE: Record<SortKey, (s: SessionSummary) => string | number> = {
   model: (s) => s.models[0] ?? '',
   prompts: (s) => s.prompts,
   tools: (s) => s.toolCalls,
-  tokens: (s) => newTokens(s.usage),
+  tokens: (s) => totalNewTokens(s),
   cache: (s) => cacheHitRate(s.usage) ?? -1,
   allowance: (s) => s.allowance ?? -1,
 };
@@ -84,13 +107,19 @@ const HINT: Partial<Record<SortKey, string>> = {
 export function Sessions({
   sessions,
   onOpen,
+  grouped,
+  onGrouped,
 }: {
   sessions: SessionSummary[];
   onOpen: (s: SessionSummary) => void;
+  grouped: boolean;
+  onGrouped: (v: boolean) => void;
 }) {
   const [sortKey, setSortKey] = useState<SortKey>('when');
   const [asc, setAsc] = useState(false);
   const [query, setQuery] = useState('');
+  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
+  const [listRef, onListKeys] = useRowNav();
   const width = useWidth();
 
   const layout = width < 700 ? 'tiny' : width < 920 ? 'narrow' : width < 1180 ? 'mid' : 'wide';
@@ -112,6 +141,16 @@ export function Sessions({
     });
   }, [sessions, sortKey, asc, query]);
 
+  const groups = useMemo(() => groupBy(rows, (s) => s.repo), [rows]);
+
+  const toggle = (key: string): void => {
+    setCollapsed((current) => {
+      const next = new Set(current);
+      if (!next.delete(key)) next.add(key);
+      return next;
+    });
+  };
+
   const sort = (key: SortKey): void => {
     if (key === sortKey) setAsc((v) => !v);
     else {
@@ -124,6 +163,16 @@ export function Sessions({
   return (
     <div style={{ display: 'flex', flexDirection: 'column', minHeight: 0, height: '100%' }}>
       <TopBar title="Sessions" count={rows.length}>
+        <button
+          className="ghost-button"
+          aria-pressed={grouped}
+          onClick={() => {
+            onGrouped(!grouped);
+          }}
+          style={{ marginLeft: 'auto' }}
+        >
+          {grouped ? 'Grouped by project' : 'Group by project'}
+        </button>
         <input
           value={query}
           onChange={(e) => {
@@ -132,7 +181,6 @@ export function Sessions({
           placeholder="Filter sessions…"
           spellCheck={false}
           style={{
-            marginLeft: 'auto',
             width: 300,
             height: 26,
             padding: '0 9px',
@@ -145,7 +193,7 @@ export function Sessions({
         />
       </TopBar>
 
-      <div style={{ overflow: 'auto', minHeight: 0, flex: 1 }}>
+      <div style={{ overflow: 'auto', minHeight: 0, flex: 1 }} ref={listRef} onKeyDown={onListKeys}>
         <div className="thead" style={grid}>
           {columns.map((c) => (
             <Tooltip key={c.key} text={HINT[c.key]}>
@@ -168,17 +216,44 @@ export function Sessions({
           ))}
         </div>
 
-        {rows.map((s) => (
-          <Row
-            key={s.id}
-            session={s}
-            columns={columns}
-            grid={grid}
-            onOpen={() => {
-              onOpen(s);
-            }}
-          />
-        ))}
+        {!grouped &&
+          rows.map((s) => (
+            <Row
+              key={s.id}
+              session={s}
+              columns={columns}
+              grid={grid}
+              onOpen={() => {
+                onOpen(s);
+              }}
+            />
+          ))}
+
+        {grouped &&
+          groups.map((g) => (
+            <Fragment key={g.key}>
+              <GroupHeader
+                name={g.key}
+                meta={summarise(g.items)}
+                collapsed={collapsed.has(g.key)}
+                onToggle={() => {
+                  toggle(g.key);
+                }}
+              />
+              {!collapsed.has(g.key) &&
+                g.items.map((s) => (
+                  <Row
+                    key={s.id}
+                    session={s}
+                    columns={columns}
+                    grid={grid}
+                    onOpen={() => {
+                      onOpen(s);
+                    }}
+                  />
+                ))}
+            </Fragment>
+          ))}
 
         {rows.length === 0 && (
           <Empty>
@@ -228,11 +303,7 @@ function Row({
         {when(s.startedAt)}
       </div>
     ),
-    dur: (
-      <div className="num" title={`Spans ${duration(s.spanMs)} including idle`}>
-        {duration(s.activeMs)}
-      </div>
-    ),
+    dur: <div className="num">{duration(s.activeMs)}</div>,
     model: (
       <div className="mono ellipsis" style={{ fontSize: 11, color: 'var(--dim)' }}>
         {s.models[0] ? model(s.models[0]) : BLANK}
@@ -245,7 +316,23 @@ function Row({
     tools: <div className="num">{s.toolCalls}</div>,
     tokens: (
       <div className="num" style={{ color: 'var(--fg)' }}>
-        {tokens(newTokens(s.usage))}
+        {tokens(totalNewTokens(s))}
+        {/*
+          Subagents have their own context windows, so their cost is real,
+          separate, and invisible unless it is said out loud. A row showing only
+          its own work understates the heaviest session here five-fold.
+        */}
+        {newTokens(s.subagentUsage) > 0 && (
+          <span
+            className="mono"
+            style={{ color: 'var(--faint)', fontSize: 10.5, marginLeft: 5 }}
+            title={`${tokens(newTokens(s.usage))} in this session, ${tokens(
+              newTokens(s.subagentUsage),
+            )} across ${String(s.subagents)} subagents`}
+          >
+            +{tokens(newTokens(s.subagentUsage))}
+          </span>
+        )}
       </div>
     ),
     cache: (
@@ -274,7 +361,7 @@ function Row({
   };
 
   return (
-    <div className="trow" style={grid} onClick={onOpen}>
+    <div className="trow" style={grid} {...rowProps(onOpen)}>
       {columns.map((c) => (
         <div key={c.key} style={{ minWidth: 0 }}>
           {cell[c.key]}

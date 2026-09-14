@@ -2,8 +2,6 @@ import {
   Activity,
   Bell,
   ChartColumn,
-  Database,
-  Folder,
   Lightbulb,
   Sparkles,
   List,
@@ -20,14 +18,12 @@ import type {
   SessionSummary,
   UsageSample,
 } from '../shared/model.js';
-import { Cache } from './Cache.js';
 import { Detail } from './Detail.js';
 import { Analytics } from './Analytics.js';
 import { Insights } from './Insights.js';
 import { Live } from './Live.js';
 import { Palette } from './Palette.js';
 import { Search } from './Search.js';
-import { Projects } from './Projects.js';
 import { Settings } from './Settings.js';
 import { Alerts as AlertsScreen } from './Alerts.js';
 import { Recommendations } from './Recommendations.js';
@@ -35,7 +31,7 @@ import { Sessions } from './Sessions.js';
 import { duration } from './format.js';
 import type { Prefs } from '../shared/prefs.js';
 import iconUrl from './icon.png';
-import { loadPrefs } from './prefs.js';
+import { loadPrefs, savePrefs } from './prefs.js';
 import { Empty } from './ui/Empty.js';
 import { Meter } from './ui/Meter.js';
 import { Tooltip } from './ui/Tooltip.js';
@@ -44,14 +40,12 @@ import { useWidth } from './useWidth.js';
 
 type Screen =
   | { at: 'sessions' }
-  | { at: 'cache' }
   | { at: 'insights' }
   | { at: 'recommendations' }
   | { at: 'analytics' }
   | { at: 'live' }
   | { at: 'alerts' }
   | { at: 'search' }
-  | { at: 'projects' }
   | { at: 'settings' }
   | { at: 'detail'; session: SessionDetail; tab: string; eventId?: string };
 
@@ -75,8 +69,6 @@ const NAV: NavItem[] = [
   { id: 'analytics', label: 'Analytics', icon: ChartColumn, ready: true },
   { id: 'insights', label: 'Insights', icon: Lightbulb, ready: true },
   { id: 'recommendations', label: 'Recommendations', icon: Sparkles, ready: true },
-  { id: 'projects', label: 'Projects', icon: Folder, ready: true },
-  { id: 'cache', label: 'Cache', icon: Database, ready: true },
   { id: 'settings', label: 'Settings', icon: SlidersVertical, ready: true },
 ];
 
@@ -107,8 +99,6 @@ const SCREEN_FOR: Record<string, Screen> = {
   analytics: { at: 'analytics' },
   insights: { at: 'insights' },
   recommendations: { at: 'recommendations' },
-  projects: { at: 'projects' },
-  cache: { at: 'cache' },
   settings: { at: 'settings' },
 };
 
@@ -229,6 +219,13 @@ export function App() {
         ...(alert.eventId !== undefined ? { eventId: alert.eventId } : {}),
       });
     });
+  }, []);
+
+  // Preferences are changed from more than one place now, so saving belongs
+  // here rather than at each call site.
+  const changePrefs = useCallback((next: Prefs) => {
+    savePrefs(next);
+    setPrefs(next);
   }, []);
 
   const back = useCallback(() => {
@@ -389,7 +386,7 @@ export function App() {
           prefs={prefs}
           theme={theme}
           onTheme={setTheme}
-          onPrefs={setPrefs}
+          onPrefs={changePrefs}
           onOpen={open}
           onBack={back}
           onDetail={(session) => {
@@ -502,7 +499,7 @@ function CurrentScreen(p: ScreenProps) {
     );
   }
   if (screen.at === 'alerts') {
-    return <AlertsScreen onOpen={p.onOpenAlert} />;
+    return <AlertsScreen onOpen={p.onOpenAlert} grouped={p.prefs.groupByProject} />;
   }
   if (screen.at === 'settings') {
     return <Settings theme={p.theme} onTheme={p.onTheme} prefs={p.prefs} onPrefs={p.onPrefs} />;
@@ -521,7 +518,6 @@ function CurrentScreen(p: ScreenProps) {
       />
     );
   }
-  if (screen.at === 'cache') return <Cache />;
   if (screen.at === 'recommendations') return <Recommendations />;
 
   // The screen's own bar is drawn while the Transcripts are still being read.
@@ -539,13 +535,20 @@ function CurrentScreen(p: ScreenProps) {
   const sessions = index.sessions;
   switch (screen.at) {
     case 'sessions':
-      return <Sessions sessions={sessions} onOpen={p.onOpen} />;
+      return (
+        <Sessions
+          sessions={sessions}
+          onOpen={p.onOpen}
+          grouped={p.prefs.groupByProject}
+          onGrouped={(v) => {
+            p.onPrefs({ ...p.prefs, groupByProject: v });
+          }}
+        />
+      );
     case 'search':
       return <Search sessions={sessions} onOpen={p.onOpen} />;
     case 'analytics':
       return <Analytics sessions={sessions} usage={p.usage} onOpen={p.onOpen} />;
-    case 'projects':
-      return <Projects sessions={sessions} onOpen={p.onOpen} />;
     case 'insights':
       return <Insights sessions={sessions} onOpen={p.onOpen} />;
   }

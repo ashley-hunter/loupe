@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { SearchHit, SearchResult } from '../main/search.js';
+import { rowProps, useRowNav } from './useRowNav.js';
 import type { EventKind, SessionSummary } from '../shared/model.js';
 import { KIND } from './kinds.js';
 import { Chips } from './ui/Chips.js';
@@ -30,6 +31,7 @@ export function Search({
   onOpen: (s: SessionSummary, tab: SearchHit['tab']) => void;
 }) {
   const [query, setQuery] = useState('');
+  const [listRef, onListKeys] = useRowNav();
   const [kind, setKind] = useState<EventKind | 'session' | 'all'>('all');
   const [result, setResult] = useState<SearchResult | null>(null);
   const [busy, setBusy] = useState(false);
@@ -104,7 +106,7 @@ export function Search({
         <Chips options={FILTERS} value={kind} counts={counts} onChange={setKind} />
       </div>
 
-      <div className="scroll-pane">
+      <div className="scroll-pane" ref={listRef} onKeyDown={onListKeys}>
         {query.trim().length < 2 && (
           <Empty align="left">
             Searches every event in every transcript — file paths, commands, and the opening of each
@@ -151,7 +153,7 @@ function Hit({ hit, query, onOpen }: { hit: SearchHit; query: string; onOpen: ()
     hit.kind === 'session' ? (['SESSION', 'var(--accent)'] as const) : KIND[hit.kind];
 
   return (
-    <div className="trow" style={{ ...GRID, height: 34 }} onClick={onOpen}>
+    <div className="trow" style={{ ...GRID, height: 34 }} {...rowProps(onOpen)}>
       <div className="mono" style={{ fontSize: 11, color: 'var(--faint)' }} title={when(hit.at)}>
         {clock(hit.at)}
       </div>

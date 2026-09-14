@@ -172,7 +172,34 @@ const countToolCalls = (r: Record_): number =>
  * Costs are left null here — what an Event added to the context is only
  * knowable from the Request that follows it, which the caller resolves.
  */
-function eventsFromBlocks(r: Record_, request: RequestId): Event[] {
+/**
+ * A thinking or text block as an Event.
+ *
+ * Both keep their full text when bodies are wanted: a conversation read as a
+ * thread needs what was actually said, and 140 characters is a list row. Claude
+ * Code strips the prose from all but about 2% of thinking blocks, so for those
+ * the token count remains the only real information.
+ */
+function spokenEvent(
+  block: { b: Record<string, unknown>; type: 'thinking' | 'text'; uuid: string },
+  base: { at: string; depth: number; request: RequestId; cost: number | null },
+  keepBodies: boolean,
+): Event | null {
+  const { b, type, uuid } = block;
+  const thinking = type === 'thinking';
+  const body = text(b[thinking ? 'thinking' : 'text']);
+  if (!thinking && !body.trim()) return null;
+
+  return {
+    ...base,
+    id: `${uuid}-${thinking ? 't' : 'x'}`,
+    kind: thinking ? 'think' : 'asst',
+    title: firstLine(body) || 'Thinking',
+    ...(keepBodies && body ? { body } : {}),
+  };
+}
+
+function eventsFromBlocks(r: Record_, request: RequestId, keepBodies: boolean): Event[] {
   const depth = r.isSidechain ? 1 : 0;
   const base = { at: r.timestamp ?? '', depth, request, cost: null as number | null };
   const out: Event[] = [];
@@ -180,18 +207,9 @@ function eventsFromBlocks(r: Record_, request: RequestId): Event[] {
   for (const b of contentBlocks(r)) {
     const type = b['type'];
 
-    if (type === 'thinking') {
-      // Claude Code retains the signature but strips the text on all but ~2% of
-      // thinking blocks, so the token count is the only real information here.
-      const retained = firstLine(text(b['thinking']));
-      out.push({ ...base, id: `${r.uuid}-t`, kind: 'think', title: retained || 'Thinking' });
-      continue;
-    }
-
-    if (type === 'text') {
-      const said = text(b['text']);
-      if (said.trim())
-        out.push({ ...base, id: `${r.uuid}-x`, kind: 'asst', title: firstLine(said) });
+    if (type === 'thinking' || type === 'text') {
+      const spoken = spokenEvent({ b, type, uuid: r.uuid ?? '' }, base, keepBodies);
+      if (spoken) out.push(spoken);
       continue;
     }
 
@@ -331,7 +349,7 @@ export async function parseTranscript(
     }
 
     if (opts.withEvents) {
-      g.events.push(...eventsFromBlocks(r, id as RequestId));
+      g.events.push(...eventsFromBlocks(r, id as RequestId, opts.withBodies === true));
     }
     g.toolCalls += countToolCalls(r);
   }
@@ -376,6 +394,9 @@ export async function parseTranscript(
     id,
     path,
     project: cwd ? basename(cwd) : 'unknown',
+    // Overwritten by the index once the disk has been asked whether this cwd is
+    // a worktree. Parsing is a pure read of the Transcript and stays that way.
+    repo: cwd ? basename(cwd) : 'unknown',
     cwd,
     name: name || 'Untitled session',
     startedAt,
@@ -388,6 +409,8 @@ export async function parseTranscript(
     requestCount: requests.length,
     usage,
     subagents: opts.subagents ?? 0,
+    // Filled in by the index, which is where Subagent Transcripts are read.
+    subagentUsage: EMPTY_USAGE,
     status: statusOf(opts.mtimeMs),
     // Blank for every Session recorded before the poller existed.
     allowance: null,

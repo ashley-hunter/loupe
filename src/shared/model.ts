@@ -47,6 +47,8 @@ export interface Invalidation {
   sessionId: SessionId;
   sessionName: string;
   project: string;
+  /** The repository behind the project, so worktrees group together. */
+  repo: string;
   at: string;
   cause: InvalidationCause;
   /** Tokens written to rebuild the prefix. */
@@ -67,6 +69,10 @@ export const EMPTY_USAGE: Usage = { input: 0, cacheRead: 0, cacheWrite: 0, outpu
  * Session). Report cacheRead on its own, never inside a total.
  */
 export const newTokens = (u: Usage): number => u.input + u.cacheWrite + u.output;
+
+/** What a Session cost in total: its own work and everything it delegated. */
+export const totalNewTokens = (s: { usage: Usage; subagentUsage: Usage }): number =>
+  newTokens(s.usage) + newTokens(s.subagentUsage);
 
 /** Share of input that came from cache rather than being rewritten. 0..1, or null when there was no input at all. */
 export function cacheHitRate(u: Usage): number | null {
@@ -171,6 +177,13 @@ export interface SessionSummary {
   path: string;
   /** Derived from the Session's cwd. */
   project: string;
+  /**
+   * The repository the cwd belongs to, which is the project unless the Session
+   * ran in a git worktree. Several worktrees of one repository are one place to
+   * work, and grouping them apart would answer "where did this come from" with
+   * the name of a branch.
+   */
+  repo: string;
   /** The Session's working directory. File paths are shown relative to it. */
   cwd: string;
   name: string;
@@ -192,6 +205,15 @@ export interface SessionSummary {
   requestCount: number;
   usage: Usage;
   subagents: number;
+  /**
+   * What this Session's Subagents spent, which is not part of `usage`.
+   *
+   * A Subagent has its own context window and its own Transcript, so its cost
+   * is real, separate, and easy to miss: measured across the Transcripts here,
+   * Subagents are 52% of all new tokens, and the heaviest Session shows 27.6M
+   * of its own against 138.4M spent by the 363 agents it delegated to.
+   */
+  subagentUsage: Usage;
   status: SessionStatus;
   /**
    * Share of the Block's rolling limit this Session consumed. Null for every
@@ -244,7 +266,8 @@ export type FindingKind =
   | 'retry-churn'
   | 'binary-read'
   | 'thinking-heavy'
-  | 'web-repeat';
+  | 'web-repeat'
+  | 'noisy-command';
 
 export interface Finding {
   id: string;
@@ -299,6 +322,8 @@ export interface Alert {
   sessionId: SessionId;
   sessionName: string;
   project: string;
+  /** The repository behind the project, so worktrees group together. */
+  repo: string;
   /** Where the Transcript is, so the Session can be reopened from an Alert. */
   sessionPath: string;
   at: string;

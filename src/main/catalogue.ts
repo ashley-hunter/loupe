@@ -7,7 +7,9 @@ import type {
   Recommendation,
   SessionDetail,
   SessionSummary,
+  Usage,
 } from '../shared/model.js';
+import { EMPTY_USAGE } from '../shared/model.js';
 import { buildRecommendations } from './recommendations.js';
 import { byProject, type ProjectRollup } from '../shared/rollup.js';
 import { findAll } from './detectors.js';
@@ -15,6 +17,7 @@ import { search, type SearchResult } from './search.js';
 import { attribute } from './allowance.js';
 import { findInvalidations, summarise, type CacheSummary } from './invalidations.js';
 import { parseDetail, parseTranscript } from './parse.js';
+import { repoOf } from './worktree.js';
 import { readSamples } from './usage.js';
 
 /**
@@ -76,6 +79,41 @@ export async function findTranscripts(root = TRANSCRIPT_ROOT): Promise<Found[]> 
 }
 
 /**
+ * What a Session's Subagents spent, taken together.
+ *
+ * Only the usage is wanted here, so the Transcripts are parsed without Events:
+ * 566 of them cost about 1.8s cold on this machine, and nothing after that,
+ * because the result is cached with the Session summary.
+ */
+async function sumSubagents(paths: string[]): Promise<Usage> {
+  if (paths.length === 0) return EMPTY_USAGE;
+
+  const parsed = await Promise.all(
+    paths.map((p) => parseTranscript(p, { mtimeMs: 0, withEvents: false }).catch(() => null)),
+  );
+
+  return parsed.reduce<Usage>((total, r) => {
+    const u = r?.summary.usage;
+    return u
+      ? {
+          input: total.input + u.input,
+          cacheRead: total.cacheRead + u.cacheRead,
+          cacheWrite: total.cacheWrite + u.cacheWrite,
+          output: total.output + u.output,
+          thinking: total.thinking + u.thinking,
+        }
+      : total;
+  }, EMPTY_USAGE);
+}
+
+/** Fill in each Session's repository, collapsing worktrees onto their repo. */
+async function withRepos(sessions: SessionSummary[]): Promise<void> {
+  const cwds = [...new Set(sessions.map((s) => s.cwd))];
+  const names = new Map(await Promise.all(cwds.map(async (c) => [c, await repoOf(c)] as const)));
+  for (const s of sessions) s.repo = names.get(s.cwd) ?? s.project;
+}
+
+/**
  * Cached SessionSummaries, keyed by Transcript path.
  *
  * A full cold parse of every Transcript takes seconds, not minutes,
@@ -90,13 +128,32 @@ interface CacheEntry {
 }
 type Cache = Record<string, CacheEntry>;
 
+/**
+ * Bump when SessionSummary gains or changes a field.
+ *
+ * The cache holds whole summaries, so an entry written by an older build is
+ * missing whatever was added since. Reusing one then hands the rest of the app
+ * a Session with a field that is simply absent, which is how adding
+ * `subagentUsage` turned every existing install into a crash on launch. A
+ * rebuild costs a few seconds; a stale entry costs correctness.
+ */
+const CACHE_VERSION = 2;
+
+interface CacheFile {
+  version: number;
+  entries: Cache;
+}
+
 const readCache = async (): Promise<Cache> =>
   readFile(CACHE_PATH, 'utf8')
-    .then((s) => JSON.parse(s) as Cache)
+    .then((raw) => {
+      const file = JSON.parse(raw) as Partial<CacheFile>;
+      return file.version === CACHE_VERSION && file.entries ? file.entries : {};
+    })
     .catch(() => ({}));
 
-const writeCache = (c: Cache): Promise<void> =>
-  writeFile(CACHE_PATH, JSON.stringify(c)).catch(() => undefined);
+const writeCache = (entries: Cache): Promise<void> =>
+  writeFile(CACHE_PATH, JSON.stringify({ version: CACHE_VERSION, entries })).catch(() => undefined);
 
 export interface IndexResult {
   sessions: SessionSummary[];
@@ -131,6 +188,10 @@ export async function buildIndex(root = TRANSCRIPT_ROOT): Promise<IndexResult> {
         subagents: f.subagentPaths.length,
       }).catch(() => null);
       if (!result) return;
+      // Subagents are half of everything spent, so the index reads them too.
+      // Cached with the Session's own summary: a Subagent writes while its
+      // parent does, so the parent's mtime moves when theirs does.
+      result.summary.subagentUsage = await sumSubagents(f.subagentPaths);
       parsed++;
       next[f.path] = { mtimeMs: f.mtimeMs, size: f.size, summary: result.summary };
       sessions.push(result.summary);
@@ -139,6 +200,12 @@ export async function buildIndex(root = TRANSCRIPT_ROOT): Promise<IndexResult> {
 
   sessions.sort((a, b) => (a.startedAt < b.startedAt ? 1 : -1));
   await writeCache(next);
+
+  // Resolved after the cache, not inside it: the cache is keyed on the
+  // Transcript, and whether a directory is a worktree is a fact about the disk
+  // that can change without the Transcript changing. One small read per
+  // distinct cwd, memoised.
+  await withRepos(sessions);
 
   // Allowance is applied after caching, never inside it: the summary cache is
   // keyed on the Transcript, but Allowance comes from the sample series, which
@@ -245,5 +312,8 @@ export async function loadSession(
   });
   if (!detail) return null;
 
-  return { ...detail, invalidations: findInvalidations(detail, detail.requests) };
+  // Resolved here as well as in the index: Live and the Alert detectors read a
+  // Session through this path without the index having touched it.
+  const withRepo = { ...detail, repo: await repoOf(detail.cwd) };
+  return { ...withRepo, invalidations: findInvalidations(withRepo, withRepo.requests) };
 }

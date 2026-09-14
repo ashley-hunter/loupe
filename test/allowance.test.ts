@@ -15,6 +15,7 @@ const session = (id: string, startedAt: string, endedAt: string): SessionSummary
   id: id as SessionSummary['id'],
   path: `/${id}.jsonl`,
   project: 'demo',
+  repo: 'demo',
   cwd: '/x/demo',
   name: id,
   startedAt,
@@ -27,6 +28,7 @@ const session = (id: string, startedAt: string, endedAt: string): SessionSummary
   requestCount: 0,
   usage: EMPTY_USAGE,
   subagents: 0,
+  subagentUsage: EMPTY_USAGE,
   status: 'completed',
   allowance: null,
 });

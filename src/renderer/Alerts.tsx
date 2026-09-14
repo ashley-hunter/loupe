@@ -1,5 +1,8 @@
 import { Bell, Database, Layers } from 'lucide-react';
+import { Fragment, useState } from 'react';
 import type { Alert, AlertKind } from '../shared/model.js';
+import { groupBy } from '../shared/group.js';
+import { GroupHeader } from './ui/GroupHeader.js';
 import { ICON } from './App.js';
 import { clock, tokens, when } from './format.js';
 import { useAsync } from './useAsync.js';
@@ -20,8 +23,17 @@ const KINDS: Record<AlertKind, { label: string; icon: typeof Database }> = {
  * the Session it came from and the measured facts behind it, because "cache
  * rebuilt three times" is not a diagnosis on its own.
  */
-export function Alerts({ onOpen }: { onOpen: (alert: Alert) => void }) {
+export function Alerts({ onOpen, grouped }: { onOpen: (alert: Alert) => void; grouped: boolean }) {
   const state = useAsync<Alert[]>(() => window.loupe.alertHistory());
+  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
+
+  const toggle = (key: string): void => {
+    setCollapsed((current) => {
+      const next = new Set(current);
+      if (!next.delete(key)) next.add(key);
+      return next;
+    });
+  };
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
@@ -39,7 +51,29 @@ export function Alerts({ onOpen }: { onOpen: (alert: Alert) => void }) {
             </Empty>
           )}
           {state.status === 'ready' &&
+            !grouped &&
             state.data.map((a) => <Card key={a.id} alert={a} onOpen={onOpen} />)}
+
+          {state.status === 'ready' &&
+            grouped &&
+            groupBy(state.data, (a) => a.repo).map((g) => (
+              <Fragment key={g.key}>
+                <div style={{ marginBottom: 8 }}>
+                  <GroupHeader
+                    name={g.key}
+                    meta={`${String(g.items.length)}  ·  ${tokens(
+                      g.items.reduce((n, a) => n + a.tokens, 0),
+                    )}`}
+                    collapsed={collapsed.has(g.key)}
+                    onToggle={() => {
+                      toggle(g.key);
+                    }}
+                  />
+                </div>
+                {!collapsed.has(g.key) &&
+                  g.items.map((a) => <Card key={a.id} alert={a} onOpen={onOpen} />)}
+              </Fragment>
+            ))}
         </div>
       </div>
     </div>

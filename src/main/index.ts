@@ -57,6 +57,37 @@ function createWindow(): void {
   void (DEV_URL ? win.loadURL(DEV_URL) : win.loadFile(join(here, '../renderer/index.html')));
 }
 
+/** Click the nth element matching SHOT_CLICK, as `selector#index`. */
+async function runClick(win: BrowserWindow): Promise<void> {
+  const spec = process.env['SHOT_CLICK'];
+  if (!spec) return;
+  const [sel, nth] = spec.split('#');
+  const clicked = (await win.webContents.executeJavaScript(`
+    (() => {
+      const all = [...document.querySelectorAll(${JSON.stringify(sel)})];
+      const el = all[${JSON.stringify(Number(nth ?? 0))}];
+      if (!el) return 'NOT FOUND: ' + ${JSON.stringify(sel)} + ' (' + all.length + ' present)';
+      el.click();
+      return 'clicked ' + ${JSON.stringify(sel)};
+    })()
+  `)) as string;
+  console.log('[shot]', clicked);
+  await new Promise((r) => setTimeout(r, 900));
+}
+
+/**
+ * Evaluate SHOT_PROBE in the page and log what it returns.
+ *
+ * How the rendering costs here get measured: DOM node counts, the time to open
+ * a Session, heap size. Numbers beat looking at a screenshot and guessing.
+ */
+async function runProbe(win: BrowserWindow): Promise<void> {
+  const source = process.env['SHOT_PROBE'];
+  if (!source) return;
+  const result = (await win.webContents.executeJavaScript(source)) as unknown;
+  console.log('[probe]', JSON.stringify(result));
+}
+
 /**
  * Render the window to a PNG and exit. Set SHOT_OUT (and optionally SHOT_SCREEN
  * / SHOT_THEME) to use it.
@@ -147,20 +178,7 @@ async function capture(win: BrowserWindow): Promise<void> {
       console.log('[shot]', typed);
       await new Promise((r) => setTimeout(r, 3500));
     }
-    if (process.env['SHOT_CLICK']) {
-      const [sel, nth] = process.env['SHOT_CLICK'].split('#');
-      const clicked = (await win.webContents.executeJavaScript(`
-        (() => {
-          const all = [...document.querySelectorAll(${JSON.stringify(sel)})];
-          const el = all[${JSON.stringify(Number(nth ?? 0))}];
-          if (!el) return 'NOT FOUND: ' + ${JSON.stringify(sel)} + ' (' + all.length + ' present)';
-          el.click();
-          return 'clicked ' + ${JSON.stringify(sel)};
-        })()
-      `)) as string;
-      console.log('[shot]', clicked);
-      await new Promise((r) => setTimeout(r, 900));
-    }
+    await runClick(win);
     if (process.env['SHOT_SCROLL'] === 'bottom') {
       await win.webContents.executeJavaScript(`
         (() => {
@@ -179,6 +197,7 @@ async function capture(win: BrowserWindow): Promise<void> {
       win.webContents.sendInputEvent({ type: 'mouseMove', x: hx ?? 0, y: hy ?? 0 });
       await new Promise((r) => setTimeout(r, 700));
     }
+    await runProbe(win);
     const img = await win.webContents.capturePage();
     writeFileSync(process.env['SHOT_OUT']!, img.toPNG());
     console.log('[shot] wrote', process.env['SHOT_OUT']);

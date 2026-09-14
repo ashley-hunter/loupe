@@ -11,10 +11,18 @@ const invalidation = (p: Partial<Invalidation>): Invalidation => ({
   sessionId: 's1' as SessionDetail['id'],
   sessionName: 'Demo',
   project: 'demo',
+  repo: 'demo',
   at: '2026-09-12T10:00:00Z',
   cause: 'reanchor',
   rewritten: 400_000,
   idleMs: 20_000,
+  ...p,
+});
+
+/** A bare Event for the command tests, where only kind, title and cost matter. */
+const ev = (p: Pick<Event, 'id' | 'kind' | 'title' | 'cost'>): Event => ({
+  at: '2026-09-12T10:00:00Z',
+  depth: 0,
   ...p,
 });
 
@@ -33,6 +41,7 @@ const session = (p: Partial<SessionDetail> = {}): SessionDetail => ({
   id: 's1' as SessionDetail['id'],
   path: '/s1.jsonl',
   project: 'demo',
+  repo: 'demo',
   cwd: '/demo',
   name: 'Demo session',
   startedAt: '2026-09-12T10:00:00Z',
@@ -45,6 +54,7 @@ const session = (p: Partial<SessionDetail> = {}): SessionDetail => ({
   requestCount: 0,
   usage: EMPTY_USAGE,
   subagents: 0,
+  subagentUsage: EMPTY_USAGE,
   status: 'completed',
   allowance: null,
   events: [],
@@ -134,5 +144,49 @@ describe('findAll', () => {
     });
     const found = findAll([small, large]);
     expect(found.map((f) => f.recoverable)).toEqual([800_000, 30_000]);
+  });
+});
+
+describe('noisy commands', () => {
+  it('reports a command whose output filled the context', () => {
+    const found = findAll([
+      session({
+        events: [
+          ev({ id: 'b1', kind: 'bash', title: 'npm test', cost: 90_000 }),
+          ev({ id: 'r1', kind: 'read', title: '/a.ts', cost: 400 }),
+        ],
+      }),
+    ]).filter((f) => f.kind === 'noisy-command');
+
+    expect(found).toHaveLength(1);
+    expect(found[0]?.text).toContain('npm');
+    expect(found[0]?.recoverable).toBe(90_000);
+  });
+
+  it('counts only the repeats when the same command ran more than once', () => {
+    const found = findAll([
+      session({
+        events: [
+          // A leading `cd` must not become the program's name.
+          ev({ id: 'b1', kind: 'bash', title: 'cd /app && npm run build', cost: 40_000 }),
+          ev({ id: 'b2', kind: 'bash', title: 'npm run build', cost: 40_000 }),
+        ],
+      }),
+    ]).filter((f) => f.kind === 'noisy-command');
+
+    expect(found[0]?.recoverable).toBe(80_000);
+    expect(found[0]?.text).toContain('npm produced');
+    expect(found[0]?.text).toContain('2 runs');
+  });
+
+  it('ignores quiet commands, however many times they run', () => {
+    const found = findAll([
+      session({
+        events: [1, 2, 3, 4].map((n) =>
+          ev({ id: `b${String(n)}`, kind: 'bash', title: 'git status', cost: 300 }),
+        ),
+      }),
+    ]).filter((f) => f.kind === 'noisy-command');
+    expect(found).toEqual([]);
   });
 });

@@ -64,6 +64,7 @@ export function findInvalidations(session: SessionSummary, requests: Request[]):
       sessionId: session.id,
       sessionName: session.name,
       project: session.project,
+      repo: session.repo,
       at: current.at,
       cause,
       rewritten: current.usage.cacheWrite,
