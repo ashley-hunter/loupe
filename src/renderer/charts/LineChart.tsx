@@ -1,3 +1,6 @@
+import { useState } from 'react';
+import { ChartTip } from './ChartTip.js';
+
 /**
  * A rate over time, drawn as a line with an explicit vertical range.
  *
@@ -16,6 +19,7 @@ export function LineChart({
   label: string;
   unit?: string;
 }) {
+  const [hover, setHover] = useState<number | null>(null);
   const values = data.map((d) => d.value).filter((v): v is number => v !== null);
   if (values.length === 0) {
     return (
@@ -45,9 +49,18 @@ export function LineChart({
   });
   if (current.length) segments.push(current);
 
+  const active = hover === null ? null : data[hover];
+  const activeValue = active?.value ?? null;
+
   return (
     <div style={{ display: 'flex', gap: 8, height }}>
-      <div style={{ position: 'relative', flex: 1, minWidth: 0 }}>
+      <div
+        className="chart-plot"
+        style={{ position: 'relative', flex: 1, minWidth: 0 }}
+        onPointerLeave={() => {
+          setHover(null);
+        }}
+      >
         <svg
           role="img"
           aria-label={label}
@@ -57,6 +70,7 @@ export function LineChart({
         >
           {segments.map((seg, i) => (
             <polyline
+              className="chart-line"
               key={i}
               points={seg.map(([px, py]) => `${px},${py}`).join(' ')}
               fill="none"
@@ -69,12 +83,52 @@ export function LineChart({
           ))}
         </svg>
 
+        {/*
+          A crosshair and a marker on the point being read. The rule is what
+          makes a line chart legible on hover: without it the pointer is near
+          the line rather than on a specific day.
+        */}
+        {hover !== null && <div className="chart-crosshair" style={{ left: `${x(hover)}%` }} />}
+        {activeValue !== null && hover !== null && (
+          <div
+            style={{
+              position: 'absolute',
+              left: `${x(hover)}%`,
+              top: `${y(activeValue)}%`,
+              width: 7,
+              height: 7,
+              marginLeft: -3.5,
+              marginTop: -3.5,
+              borderRadius: '50%',
+              background: 'var(--accent)',
+              // A ring in the surface colour keeps the marker readable where it
+              // sits on top of the line it belongs to.
+              boxShadow: '0 0 0 2px var(--panel)',
+              pointerEvents: 'none',
+            }}
+          />
+        )}
+
         {/* Hover targets sit above the line and are wider than the marks. */}
         <div style={{ position: 'absolute', inset: 0, display: 'flex' }}>
-          {data.map((d) => (
-            <div key={d.key} title={d.tip} style={{ flex: 1 }} />
+          {data.map((d, i) => (
+            <div
+              key={d.key}
+              onPointerEnter={() => {
+                setHover(i);
+              }}
+              style={{ flex: 1 }}
+            />
           ))}
         </div>
+
+        {active && (
+          <ChartTip
+            text={active.tip}
+            x={x(hover!)}
+            y={activeValue === null ? height / 2 : (y(activeValue) / 100) * height}
+          />
+        )}
       </div>
 
       {/*

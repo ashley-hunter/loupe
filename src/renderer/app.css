@@ -507,3 +507,109 @@ button {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* --- Charts ------------------------------------------------------------- */
+
+/*
+ * Analytics is not a screen anyone opens a hundred times a day, so its marks
+ * may arrive rather than simply appear. Everything animated here is transform
+ * or opacity, and all of it stops under prefers-reduced-motion.
+ */
+@keyframes chart-rise {
+  from {
+    opacity: 0;
+    transform: scaleY(0.72);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes chart-fade {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.chart-bar {
+  transform-origin: bottom;
+  /*
+   * `backwards`, not `both`. A filled-forwards animation keeps holding its last
+   * keyframe, and an animated value outranks an ordinary declaration, so the
+   * opacity below would never take effect once the bar had finished arriving.
+   */
+  animation: chart-rise 260ms cubic-bezier(0.215, 0.61, 0.355, 1) backwards;
+  transition:
+    opacity 120ms ease,
+    filter 120ms ease;
+}
+
+/* Hovering one mark recedes the others rather than repainting the one. */
+.chart-plot[data-hovering='true'] .chart-bar[data-on='false'] {
+  opacity: 0.38;
+}
+
+.chart-line {
+  animation: chart-fade 280ms cubic-bezier(0.215, 0.61, 0.355, 1) both;
+}
+
+/*
+ * Opacity only. The tip is positioned with a transform, so animating transform
+ * here would land on `none` and drag it off the mark it is pointing at.
+ */
+@keyframes chart-tip-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.chart-tip {
+  position: absolute;
+  z-index: 3;
+  pointer-events: none;
+  white-space: nowrap;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 5px 8px;
+  box-shadow: 0 4px 14px rgb(0 0 0 / 10%);
+  animation: chart-tip-in 140ms cubic-bezier(0.215, 0.61, 0.355, 1) both;
+}
+
+.chart-tip-heading {
+  font-size: 10.5px;
+  color: var(--faint);
+  margin-bottom: 1px;
+}
+
+.chart-tip-value {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The vertical rule that ties the pointer to the point it is reading. */
+.chart-crosshair {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--line);
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chart-bar,
+  .chart-line,
+  .chart-tip {
+    animation: none;
+  }
+}

@@ -5,6 +5,7 @@ import {
   Database,
   Folder,
   Lightbulb,
+  Sparkles,
   List,
   Search as SearchIcon,
   SlidersVertical,
@@ -29,6 +30,7 @@ import { Search } from './Search.js';
 import { Projects } from './Projects.js';
 import { Settings } from './Settings.js';
 import { Alerts as AlertsScreen } from './Alerts.js';
+import { Recommendations } from './Recommendations.js';
 import { Sessions } from './Sessions.js';
 import { duration } from './format.js';
 import type { Prefs } from '../shared/prefs.js';
@@ -37,12 +39,14 @@ import { loadPrefs } from './prefs.js';
 import { Empty } from './ui/Empty.js';
 import { Meter } from './ui/Meter.js';
 import { Tooltip } from './ui/Tooltip.js';
+import { TopBar } from './ui/TopBar.js';
 import { useWidth } from './useWidth.js';
 
 type Screen =
   | { at: 'sessions' }
   | { at: 'cache' }
   | { at: 'insights' }
+  | { at: 'recommendations' }
   | { at: 'analytics' }
   | { at: 'live' }
   | { at: 'alerts' }
@@ -70,6 +74,7 @@ const NAV: NavItem[] = [
   { id: 'alerts', label: 'Alerts', icon: Bell, ready: true },
   { id: 'analytics', label: 'Analytics', icon: ChartColumn, ready: true },
   { id: 'insights', label: 'Insights', icon: Lightbulb, ready: true },
+  { id: 'recommendations', label: 'Recommendations', icon: Sparkles, ready: true },
   { id: 'projects', label: 'Projects', icon: Folder, ready: true },
   { id: 'cache', label: 'Cache', icon: Database, ready: true },
   { id: 'settings', label: 'Settings', icon: SlidersVertical, ready: true },
@@ -101,6 +106,7 @@ const SCREEN_FOR: Record<string, Screen> = {
   alerts: { at: 'alerts' },
   analytics: { at: 'analytics' },
   insights: { at: 'insights' },
+  recommendations: { at: 'recommendations' },
   projects: { at: 'projects' },
   cache: { at: 'cache' },
   settings: { at: 'settings' },
@@ -118,6 +124,9 @@ const merge = (fresh: Alert[], current: Alert[]): Alert[] => {
   for (const a of fresh) byId.set(a.id, a);
   return [...byId.values()].sort((a, b) => Date.parse(b.at) - Date.parse(a.at)).slice(0, 20);
 };
+
+/** The bar title for each screen, so it can be drawn before the data arrives. */
+const TITLE_FOR: Record<string, string> = Object.fromEntries(NAV.map((n) => [n.id, n.label]));
 
 /** The design's icon size and weight, used everywhere an icon appears. */
 export const ICON = { size: 15, strokeWidth: 1.7 } as const;
@@ -513,8 +522,19 @@ function CurrentScreen(p: ScreenProps) {
     );
   }
   if (screen.at === 'cache') return <Cache />;
+  if (screen.at === 'recommendations') return <Recommendations />;
 
-  if (!index) return <Empty fill>Reading transcripts…</Empty>;
+  // The screen's own bar is drawn while the Transcripts are still being read.
+  // Waiting for the parse to show it made the window look like it had not
+  // finished launching, and took the title and the drag handle with it.
+  if (!index) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
+        <TopBar title={TITLE_FOR[screen.at] ?? 'Loupe'} />
+        <Empty fill>Reading transcripts…</Empty>
+      </div>
+    );
+  }
 
   const sessions = index.sessions;
   switch (screen.at) {

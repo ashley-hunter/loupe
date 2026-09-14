@@ -14,7 +14,16 @@ import type { Recommendation, SessionDetail } from '../shared/model.js';
  */
 
 /** Claude Code keeps per-project MCP configuration here. */
-const CONFIG_PATH = join(homedir(), '.claude.json');
+/**
+ * Claude Code's own configuration, which is where MCP servers are declared.
+ *
+ * Moves with `LOUPE_ROOT` like everything else a demo run reads: this is the
+ * one place left that reached past it into the real machine, so a screenshot
+ * of the Recommendations screen carried real project names.
+ */
+const CONFIG_PATH = process.env['LOUPE_ROOT']
+  ? join(process.env['LOUPE_ROOT'], '.claude.json')
+  : join(homedir(), '.claude.json');
 
 interface ClaudeConfig {
   mcpServers?: Record<string, unknown>;

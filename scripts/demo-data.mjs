@@ -337,6 +337,25 @@ await writeFile(
   join(root, '.loupe-usage.jsonl'),
   samples.map((s) => JSON.stringify(s)).join('\n') + '\n',
 );
+/**
+ * A stand-in for Claude Code's own config, so the Recommendations screen has
+ * something to report without reading the real one.
+ */
+await writeFile(
+  join(root, '.claude.json'),
+  JSON.stringify(
+    {
+      mcpServers: { 'design-tokens': {} },
+      projects: {
+        '/Users/dev/code/payments-api': { mcpServers: { 'stripe-sandbox': {} } },
+        '/Users/dev/code/acme-web': { mcpServers: { 'browser-tools': {} } },
+      },
+    },
+    null,
+    2,
+  ) + '\n',
+);
+
 console.log(
   `${SESSIONS.length} sessions and ${samples.length} allowance samples written to ${root}`,
 );

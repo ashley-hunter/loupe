@@ -1,12 +1,6 @@
-import { Check, Database, Copy, Layers, Info, RefreshCcw } from 'lucide-react';
+import { Check, Database, Copy, Layers, RefreshCcw } from 'lucide-react';
 import { useMemo, useState } from 'react';
-import type {
-  Finding,
-  FindingCategory,
-  FindingKind,
-  Recommendation,
-  SessionSummary,
-} from '../shared/model.js';
+import type { Finding, FindingCategory, FindingKind, SessionSummary } from '../shared/model.js';
 import { ICON } from './App.js';
 import { tokens } from './format.js';
 import { useAsync } from './useAsync.js';
@@ -44,14 +38,11 @@ export function Insights({
   onOpen: (session: SessionSummary, tab: Finding['tab']) => void;
 }) {
   const [findings, setFindings] = useState<Finding[] | null>(null);
-  const [advice, setAdvice] = useState<Recommendation[]>([]);
   const [dismissed, setDismissed] = useState<Set<string>>(readDismissed);
   const [category, setCategory] = useState<FindingCategory | 'all'>('all');
 
   const loaded = useAsync(async () => {
-    const [found, advised] = await Promise.all([window.loupe.findings(), window.loupe.advice()]);
-    setFindings(found);
-    setAdvice(advised);
+    setFindings(await window.loupe.findings());
     return true;
   });
 
@@ -152,23 +143,6 @@ export function Insights({
             {dismissed.size > 0 ? 'All findings dismissed.' : 'No findings in this category.'}
           </div>
         )}
-
-        {advice.length > 0 && category === 'all' && (
-          <section style={{ marginTop: 26, maxWidth: 820 }}>
-            <div className="eyebrow" style={{ marginBottom: 4 }}>
-              Recommendations
-            </div>
-            <p
-              style={{ color: 'var(--faint)', fontSize: 11.5, margin: '0 0 10px', lineHeight: 1.5 }}
-            >
-              Worth knowing, but not costable from the transcripts — so these carry no token figure
-              and are kept out of the total above.
-            </p>
-            {advice.map((r) => (
-              <Advice key={r.id} recommendation={r} />
-            ))}
-          </section>
-        )}
       </div>
     </div>
   );
@@ -190,35 +164,6 @@ function groupByKind(findings: Finding[]): Array<[FindingKind, Finding[]]> {
 }
 
 const sum = (findings: Finding[]): number => findings.reduce((n, f) => n + f.recoverable, 0);
-
-/** A Recommendation card. Deliberately has no number where a Finding has one. */
-function Advice({ recommendation: r }: { recommendation: Recommendation }) {
-  return (
-    <div
-      style={{
-        border: '1px solid var(--line)',
-        borderRadius: 8,
-        padding: '12px 14px',
-        marginBottom: 10,
-        background: 'var(--panel)',
-      }}
-    >
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-        <Info {...ICON} style={{ color: 'var(--dim)', flex: 'none' }} aria-hidden />
-        <span style={{ fontSize: 12.5, fontWeight: 600 }}>{r.title}</span>
-        <span className="mono" style={{ marginLeft: 'auto', color: 'var(--faint)', fontSize: 11 }}>
-          not costable
-        </span>
-      </div>
-      <p style={{ margin: '0 0 7px', lineHeight: 1.55, maxWidth: 640, color: 'var(--dim)' }}>
-        {r.text}
-      </p>
-      <div className="mono" style={{ fontSize: 11, color: 'var(--faint)' }}>
-        {r.detail}
-      </div>
-    </div>
-  );
-}
 
 function Group({
   findings,
