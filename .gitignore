@@ -3,3 +3,6 @@ dist
 .index-cache.json
 release/
 build/icon.iconset
+
+# Apple signing material. Never commit.
+.signing/

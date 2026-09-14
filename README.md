@@ -34,9 +34,8 @@ Get the latest build from the
 
 Loupe is an Apple silicon macOS app: download `Loupe-<version>-arm64.dmg`.
 
-Builds are ad-hoc signed rather than notarised, so the first open needs a
-right-click on the app and Open, then Open again. Double clicking will not
-offer the choice.
+Builds are signed with a Developer ID certificate and notarised by Apple, so
+a downloaded `.dmg` opens with a double click and no Gatekeeper warning.
 
 ## Requirements
 
@@ -76,10 +75,11 @@ Node 22 or newer.
 
 ```sh
 npm install
-npm run dev      # vite dev server plus electron
-npm start        # build and run the packaged main process
-npm run check    # typecheck, lint, format check, tests
-npm run dmg      # an ad-hoc signed dmg in release/
+npm run dev        # vite dev server plus electron
+npm start          # build and run the packaged main process
+npm run check      # typecheck, lint, format check, tests
+npm run dmg        # an ad-hoc signed dmg in release/
+npm run dmg:signed # signed with Developer ID and notarised, see docs/signing.md
 ```
 
 `npm run check` is what CI runs, and a pre-commit hook runs it on staged files.

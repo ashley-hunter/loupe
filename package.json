@@ -12,6 +12,7 @@
     "test:watch": "vitest",
     "dist": "npm run build && electron-builder --mac --dir -c.mac.identity=-",
     "dmg": "npm run build && electron-builder --mac -c.mac.identity=-",
+    "dmg:signed": "npm run build && electron-builder --mac -c.mac.notarize=true",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",

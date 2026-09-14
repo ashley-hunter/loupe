@@ -53,10 +53,42 @@ jobs:
             echo "mode=adhoc" >> "$GITHUB_OUTPUT"
           fi
 
+      # electron-builder's own CSC_LINK handling is broken in 26.x: it creates
+      # the temporary keychain with one random password and then authorises the
+      # imported key with the .p12 password instead, so set-key-partition-list
+      # always fails. Set the keychain up here and let electron-builder find the
+      # identity by auto-discovery, which leaves CSC_LINK unset - it also has to
+      # be unset for the ad-hoc path, where an empty CSC_LINK makes
+      # electron-builder try to read the working directory as a certificate.
+      - name: Import the signing certificate
+        if: steps.mac.outputs.mode != 'adhoc'
+        env:
+          CERT: ${{ secrets.MAC_CERTIFICATE_P12 }}
+          CERT_PASSWORD: ${{ secrets.MAC_CERTIFICATE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          KEYCHAIN="$RUNNER_TEMP/signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(uuidgen)"
+          P12="$RUNNER_TEMP/certificate.p12"
+
+          echo "$CERT" | base64 --decode > "$P12"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security import "$P12" -k "$KEYCHAIN" -P "$CERT_PASSWORD" \
+            -T /usr/bin/codesign -T /usr/bin/security
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN" > /dev/null
+          # Prepend rather than replace, so the system roots stay searchable.
+          security list-keychains -d user -s "$KEYCHAIN" \
+            $(security list-keychains -d user | tr -d '"')
+          rm -f "$P12"
+
+          security find-identity -v -p codesigning "$KEYCHAIN"
+
       - name: Package
         env:
-          CSC_LINK: ${{ secrets.MAC_CERTIFICATE_P12 }}
-          CSC_KEY_PASSWORD: ${{ secrets.MAC_CERTIFICATE_PASSWORD }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
@@ -113,7 +145,6 @@ jobs:
             comes from the transcripts under `~/.claude/projects` and needs no
             credentials.
 
-            Until the certificate secrets are set these builds are ad-hoc
-            signed rather than notarised, so the first open needs a right-click
-            and Open rather than a double-click. An installed build checks this
-            page for newer releases and updates itself.
+            Signed with a Developer ID certificate and notarised by Apple,
+            so the `.dmg` opens with a double click. An installed build checks
+            this page for newer releases and updates itself.
