@@ -32,24 +32,16 @@ allowance a piece of work actually cost.
 Get the latest build from the
 [releases page](https://github.com/ashley-hunter/loupe/releases/latest).
 
-| Platform             | File                                     |
-| -------------------- | ---------------------------------------- |
-| macOS, Apple silicon | `Loupe-<version>-arm64.dmg`              |
-| macOS, Intel         | `Loupe-<version>.dmg`                    |
-| Windows              | `Loupe-<version>-x64-setup.exe`          |
-| Linux                | `Loupe-<version>.AppImage` or the `.deb` |
+Loupe is an Apple silicon macOS app: download `Loupe-<version>-arm64.dmg`.
 
-Builds are not code-signed yet, so each OS objects the first time you open one:
-
-- **macOS**: right-click the app and choose Open, then Open again. Double
-  clicking will not offer the choice.
-- **Windows**: SmartScreen appears. Choose More info, then Run anyway.
-- **Linux**: `chmod +x Loupe-<version>.AppImage` before running it.
+Builds are ad-hoc signed rather than notarised, so the first open needs a
+right-click on the app and Open, then Open again. Double clicking will not
+offer the choice.
 
 ## Requirements
 
 - Claude Code, with at least one session recorded under `~/.claude/projects`.
-- macOS, Windows or Linux.
+- An Apple silicon Mac.
 
 There is no database and no setup. The first launch parses everything it finds
 and caches the result, so later launches are instant.
@@ -87,8 +79,7 @@ npm install
 npm run dev      # vite dev server plus electron
 npm start        # build and run the packaged main process
 npm run check    # typecheck, lint, format check, tests
-npm run dmg      # an unsigned macOS dmg in release/
-npm run dist:all # macOS, Windows and Linux
+npm run dmg      # an ad-hoc signed dmg in release/
 ```
 
 `npm run check` is what CI runs, and a pre-commit hook runs it on staged files.

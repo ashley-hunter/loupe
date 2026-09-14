@@ -1,6 +1,6 @@
 {
   "name": "loupe",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "type": "module",
   "main": "dist/main/index.js",
@@ -10,16 +10,15 @@
     "start": "npm run build && electron .",
     "test": "vitest run",
     "test:watch": "vitest",
-    "dist": "npm run build && electron-builder --mac --dir",
-    "dmg": "npm run build && electron-builder --mac -c.mac.identity=null",
+    "dist": "npm run build && electron-builder --mac --dir -c.mac.identity=-",
+    "dmg": "npm run build && electron-builder --mac -c.mac.identity=-",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "check": "npm run typecheck && npm run lint && npm run format:check && npm test",
-    "prepare": "husky",
-    "dist:all": "npm run build && electron-builder --mac --win --linux -c.mac.identity=null"
+    "prepare": "husky"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
@@ -50,7 +49,7 @@
     "react-dom": "^19.0.0"
   },
   "productName": "Loupe",
-  "description": "A token inspector for Claude Code \u2014 where your context, cache and allowance actually went",
+  "description": "A token inspector for Claude Code — where your context, cache and allowance actually went",
   "build": {
     "appId": "dev.ashley.loupe",
     "productName": "Loupe",
@@ -67,15 +66,13 @@
         {
           "target": "dmg",
           "arch": [
-            "arm64",
-            "x64"
+            "arm64"
           ]
         },
         {
           "target": "zip",
           "arch": [
-            "arm64",
-            "x64"
+            "arm64"
           ]
         }
       ],
@@ -89,43 +86,6 @@
     },
     "dmg": {
       "title": "Loupe"
-    },
-    "win": {
-      "target": [
-        {
-          "target": "nsis",
-          "arch": [
-            "x64",
-            "arm64"
-          ]
-        }
-      ],
-      "icon": "build/icon.png"
-    },
-    "nsis": {
-      "oneClick": false,
-      "allowToChangeInstallationDirectory": true,
-      "artifactName": "${productName}-${version}-${arch}-setup.${ext}"
-    },
-    "linux": {
-      "target": [
-        {
-          "target": "AppImage",
-          "arch": [
-            "x64",
-            "arm64"
-          ]
-        },
-        {
-          "target": "deb",
-          "arch": [
-            "x64"
-          ]
-        }
-      ],
-      "icon": "build/icon.png",
-      "category": "Development",
-      "maintainer": "Ashley Hunter"
     },
     "publish": [
       {
