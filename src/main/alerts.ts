@@ -93,7 +93,6 @@ export function detectAlerts(
           ? `${e.title.slice(0, 80)} · typical result here is ${format(typical)}`
           : e.title.slice(0, 80),
       tokens: e.cost,
-      tab: 'timeline',
       eventId: e.id,
       // One Event is the whole story here, so the evidence is that Event and
       // the yardstick it was judged against.
@@ -148,7 +147,6 @@ export function detectAlerts(
         'grown past the size where the cache holds. Finishing up and starting a fresh one is ' +
         'the only real remedy.',
       tokens: run.reduce((n, r) => n + r.rewritten, 0),
-      tab: 'cache',
       evidence: [
         ...run.map((r) => ({
           at: r.at,
@@ -206,7 +204,6 @@ function subagentSpend(session: SessionDetail, seen: ReadonlySet<string>): Alert
         'session itself. Each has its own context window, so none of this appears in the ' +
         "session's own usage.",
       tokens: spent,
-      tab: 'agents',
       evidence: costliest.map((a) => ({
         // A Subagent finishes when it finishes; the Session's own clock is the
         // closest honest timestamp for "this is what it had spent by now".

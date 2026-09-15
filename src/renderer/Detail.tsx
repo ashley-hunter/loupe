@@ -1,197 +1,192 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Tabs } from '@base-ui-components/react/tabs';
+import { PanelRight } from 'lucide-react';
 import { cacheHitRate, newTokens, type SessionDetail } from '../shared/model.js';
-import { CacheTab, FilesTab, SubagentsTab, ToolsTab } from './DetailTabs.js';
+import { byFile, byTool } from '../shared/aggregate.js';
+import { ICON } from './App.js';
 import { BackButton } from './ui/BackButton.js';
 import { Conversation } from './Conversation.js';
-import { EventRow } from './ui/EventRow.js';
-import { VirtualRows } from './ui/VirtualRows.js';
-import { Inspector } from './ui/Inspector.js';
-import { Stat } from './ui/Stat.js';
-import { StatStrip } from './ui/StatStrip.js';
-import { BLANK, duration, model, percent, tokens } from './format.js';
+import { CostBar } from './ui/CostBar.js';
+import { BLANK, duration, model, percent, shortPath, tokens } from './format.js';
 
+/**
+ * One conversation.
+ *
+ * Five tabs became one view and a panel. Timeline, Cache, Files, Tools and
+ * Subagents each answered a question about the same conversation from a
+ * different corner of the screen, so reading one meant losing your place in the
+ * others. The thread is the conversation; the panel is what it spent on.
+ */
 export function Detail({
   session,
   onBack,
-  initialTab = 'timeline',
   initialEventId,
   collapseAbove = 2000,
 }: {
   session: SessionDetail;
   onBack: () => void;
-  /** Which tab to land on — set when arriving from a Finding's evidence link. */
-  initialTab?: string;
-  /** Which Event to select on arrival — set when arriving from an Alert. */
+  /** Which Event to land on, set when arriving from an Alert. */
   initialEventId?: string;
   /** Tool output larger than this stays collapsed. 0 never collapses. */
   collapseAbove?: number;
 }) {
-  const [selected, setSelected] = useState<string | null>(
-    initialEventId ?? session.events[0]?.id ?? null,
-  );
+  const [panel, setPanel] = useState(false);
+  const [update, setUpdate] = useState<SessionDetail | null>(null);
 
-  const selectedIndex = useMemo(
-    () => session.events.findIndex((e) => e.id === selected),
-    [session.events, selected],
-  );
-  const event = selectedIndex === -1 ? null : (session.events[selectedIndex] ?? null);
+  /**
+   * A running conversation keeps arriving.
+   *
+   * Live used to be a screen, and folding it in nearly lost the thing it was
+   * for: without this a conversation that is still being written opens as a
+   * snapshot and silently goes stale while you read it. The main process
+   * watches every running transcript already, so this only has to listen for
+   * the one being read.
+   */
+  useEffect(() => {
+    setUpdate(null);
+    if (session.status !== 'active') return;
+    return window.loupe.onLive((detail) => {
+      if (detail !== null && detail.id === session.id) setUpdate(detail);
+    });
+  }, [session.id, session.status]);
 
-  // j/k move through the Timeline, as in the design.
+  const shown = update ?? session;
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
       const tag = (e.target as HTMLElement | null)?.tagName ?? '';
       if (tag === 'INPUT' || tag === 'TEXTAREA') return;
-      const down = e.key === 'j' || e.key === 'ArrowDown';
-      const up = e.key === 'k' || e.key === 'ArrowUp';
-      if (!down && !up && e.key !== 'Escape') return;
-      if (e.key === 'Escape') {
-        onBack();
-        return;
-      }
-      e.preventDefault();
-      const i = session.events.findIndex((x) => x.id === selected);
-      const next = down ? Math.min(session.events.length - 1, i + 1) : Math.max(0, i - 1);
-      setSelected(session.events[next]?.id ?? null);
+      if (e.key === 'Escape') onBack();
     };
     window.addEventListener('keydown', onKey);
     return () => {
       window.removeEventListener('keydown', onKey);
     };
-  }, [session.events, selected, onBack]);
+  }, [onBack]);
 
-  // Tab labels carry their own counts, so they are computed alongside the header.
-  const fileCount = new Set(session.events.filter((e) => e.path).map((e) => e.path)).size;
-  const toolCount = new Set(session.events.filter((e) => e.tool).map((e) => e.tool)).size;
-  const hit = cacheHitRate(session.usage);
-  const totalTokens = newTokens(session.usage);
+  const delegated = newTokens(shown.subagentUsage);
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
+    <div className="screen">
       <div className="topbar drag-region">
-        <BackButton label="Sessions" onClick={onBack} />
-        <span className="ellipsis" style={{ fontWeight: 600, letterSpacing: '-.01em' }}>
-          {session.name}
-        </span>
-        <span className="mono" style={{ color: 'var(--faint)', fontSize: 11.5, flex: 'none' }}>
-          {session.project}
-        </span>
-      </div>
-
-      <StatStrip>
-        <Stat
-          label="Active"
-          value={duration(session.activeMs)}
-          hint="Time actually worked — gaps longer than five minutes are excluded."
-        />
-        <Stat label="Prompts" value={String(session.prompts)} />
-        <Stat label="Requests" value={String(session.requestCount)} />
-        <Stat label="Tool calls" value={String(session.toolCalls)} />
-        <Stat
-          label="New tokens"
-          value={tokens(totalTokens)}
-          hint="Input, cache writes and output. Cache reads are excluded — every request re-reads the whole prefix."
-        />
-        <Stat
-          label="Cache read"
-          value={tokens(session.usage.cacheRead)}
-          hint="Summed across requests, so the same prefix is counted once per request. A volume, not a total."
-          tone="var(--dim)"
-        />
-        <Stat label="Cache written" value={tokens(session.usage.cacheWrite)} />
-        <Stat
-          label="Cache hit"
-          value={percent(hit)}
-          tone={hit !== null && hit < 0.5 ? 'var(--err)' : undefined}
-        />
-        <Stat label="Output" value={tokens(session.usage.output)} />
-        <Stat label="Subagents" value={String(session.subagents)} />
-        <Stat
-          label="Allowance"
-          value={session.allowance === null ? BLANK : percent(session.allowance)}
-          hint="Measured from the usage endpoint. Blank for sessions recorded before this app was installed."
-          tone="var(--faint)"
-        />
-        <Stat label="Model" value={session.models[0] ? model(session.models[0]) : BLANK} />
-      </StatStrip>
-
-      <Tabs.Root
-        defaultValue={initialTab}
-        style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}
-      >
-        <Tabs.List
-          style={{
-            flex: 'none',
-            display: 'flex',
-            gap: 2,
-            padding: '0 12px',
-            borderBottom: '1px solid var(--line)',
-            background: 'var(--panel)',
+        <BackButton onClick={onBack} label="Conversations" />
+        {shown.status === 'active' && <span className="status-dot" data-status="active" />}
+        <span className="detail-name ellipsis">{shown.name}</span>
+        <span className="mono detail-where">{shown.project}</span>
+        <button
+          className="ghost-button"
+          style={{ marginLeft: 'auto' }}
+          aria-pressed={panel}
+          onClick={() => {
+            setPanel((v) => !v);
           }}
         >
-          <Tab value="conversation" label={`Conversation · ${String(session.prompts)}`} />
-          <Tab value="timeline" label={`Timeline · ${session.events.length}`} />
-          <Tab value="cache" label={`Cache · ${session.invalidations.length}`} />
-          <Tab value="files" label={`Files · ${fileCount}`} />
-          <Tab value="tools" label={`Tools · ${toolCount}`} />
-          <Tab value="agents" label={`Subagents · ${session.subagentDetail.length}`} />
-        </Tabs.List>
+          <PanelRight {...ICON} aria-hidden />
+          What it spent on
+        </button>
+      </div>
 
-        <Tabs.Panel value="timeline" style={{ flex: 1, minHeight: 0, display: 'flex' }}>
-          <VirtualRows
-            items={session.events}
-            rowHeight={30}
-            scrollTo={selectedIndex}
-            empty={
-              <div style={{ padding: 40, textAlign: 'center', color: 'var(--faint)' }}>
-                This transcript has no events.
-              </div>
-            }
-            render={(e) => (
-              <EventRow
-                event={e}
-                active={e.id === selected}
-                onSelect={() => {
-                  setSelected(e.id);
-                }}
-              />
-            )}
-          />
-          <Inspector event={event} collapseAbove={collapseAbove} />
-        </Tabs.Panel>
+      <div className="detail-head">
+        <CostBar usage={shown.usage} delegated={delegated} className="detail-bar" />
+        {/* A bar nobody can read is a divider. The key is what turns the header
+            strip into the same four-part story the turns below it tell. */}
+        <div className="detail-key">
+          <Key hue="var(--warn)" label="written to cache" n={shown.usage.cacheWrite} />
+          <Key hue="var(--accent)" label="produced" n={shown.usage.output} />
+          {delegated > 0 && <Key hue="var(--blue)" label="delegated" n={delegated} />}
+        </div>
+        <div className="detail-facts">
+          <Fact label="New tokens" value={tokens(newTokens(shown.usage))} />
+          <Fact label="Delegated" value={delegated === 0 ? BLANK : tokens(delegated)} />
+          <Fact label="Served from cache" value={percent(cacheHitRate(shown.usage))} />
+          <Fact label="Active" value={duration(shown.activeMs)} />
+          <Fact label="Prompts" value={String(shown.prompts)} />
+          <Fact label="Model" value={shown.models[0] ? model(shown.models[0]) : BLANK} />
+        </div>
+      </div>
 
-        <Tabs.Panel value="conversation" style={{ flex: 1, minHeight: 0, display: 'flex' }}>
-          <Conversation session={session} />
-        </Tabs.Panel>
-
-        <Tabs.Panel value="cache" style={PANEL}>
-          <CacheTab session={session} />
-        </Tabs.Panel>
-        <Tabs.Panel value="files" style={PANEL}>
-          <FilesTab session={session} />
-        </Tabs.Panel>
-        <Tabs.Panel value="tools" style={PANEL}>
-          <ToolsTab session={session} />
-        </Tabs.Panel>
-        <Tabs.Panel value="agents" style={PANEL}>
-          <SubagentsTab session={session} onSelectEvent={setSelected} />
-        </Tabs.Panel>
-      </Tabs.Root>
+      <div className="detail-body">
+        <Conversation
+          session={shown}
+          {...(initialEventId === undefined ? {} : { focusEventId: initialEventId })}
+        />
+        {panel && <SpentOn session={shown} collapseAbove={collapseAbove} />}
+      </div>
     </div>
   );
 }
 
-const PANEL = { flex: 1, minHeight: 0, overflow: 'hidden' } as const;
+const Key = ({ hue, label, n }: { hue: string; label: string; n: number }) => (
+  <span className="detail-keyitem">
+    <i style={{ background: hue }} aria-hidden />
+    {label} <span className="mono">{tokens(n)}</span>
+  </span>
+);
 
-function Tab({ value, label, disabled }: { value: string; label: string; disabled?: boolean }) {
+const Fact = ({ label, value }: { label: string; value: string }) => (
+  <div className="detail-fact">
+    <span className="eyebrow">{label}</span>
+    <span className="mono">{value}</span>
+  </div>
+);
+
+/**
+ * What this conversation spent it on: the rollups that used to be three tabs.
+ *
+ * Beside the thread rather than instead of it, because the question this
+ * answers ("which file, which tool") only ever comes up while reading the
+ * conversation that raised it.
+ */
+function SpentOn({ session, collapseAbove }: { session: SessionDetail; collapseAbove: number }) {
+  const files = useMemo(() => byFile(session.events).slice(0, 12), [session.events]);
+  const tools = useMemo(() => byTool(session.events).slice(0, 12), [session.events]);
+  const agents = [...session.subagentDetail].sort(
+    (a, b) => newTokens(b.usage) - newTokens(a.usage),
+  );
+
   return (
-    <Tabs.Tab
-      value={value}
-      className="tab"
-      disabled={disabled ?? false}
-      title={disabled ? 'Arrives in a later version' : ''}
-    >
-      {label}
-    </Tabs.Tab>
+    <aside className="spent" aria-label="What this conversation spent it on">
+      <Group label="Files" rows={files.map((f) => [shortPath(f.key, session.cwd), f.cost])} />
+      <Group label="Tools" rows={tools.map((t) => [t.key, t.cost])} />
+      {agents.length > 0 && (
+        <Group
+          label="Subagents"
+          rows={agents.slice(0, 12).map((a) => [a.type, newTokens(a.usage)])}
+          note="own context windows, outside this total"
+        />
+      )}
+      <p className="spent-foot">
+        Tool output above {tokens(collapseAbove)} stays folded in the thread. Cache reads are
+        excluded throughout: every request re-reads the whole prefix.
+      </p>
+    </aside>
+  );
+}
+
+function Group({
+  label,
+  rows,
+  note,
+}: {
+  label: string;
+  rows: Array<[string, number]>;
+  note?: string;
+}) {
+  if (rows.length === 0) return null;
+  const peak = Math.max(1, ...rows.map(([, n]) => n));
+
+  return (
+    <section className="spent-group">
+      <div className="eyebrow">{label}</div>
+      {note !== undefined && <div className="spent-note">{note}</div>}
+      {rows.map(([name, n]) => (
+        <div key={name} className="spent-row" title={name}>
+          <span className="ellipsis">{name}</span>
+          <span className="spent-track" aria-hidden>
+            <span style={{ width: `${String((n / peak) * 100)}%` }} />
+          </span>
+          <span className="mono spent-value">{tokens(n)}</span>
+        </div>
+      ))}
+    </section>
   );
 }

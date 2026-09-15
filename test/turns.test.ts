@@ -137,3 +137,133 @@ describe('toTurns', () => {
     expect(turns[1]?.rebuilds.map((r) => r.rewritten)).toEqual([240_000]);
   });
 });
+
+/**
+ * The four-way split is what the whole conversation view reads from, and the
+ * one invariant that must never break is that it sums to the turn's own cost.
+ * A ledger that drifts from the figure printed beside it is worse than no
+ * ledger at all.
+ */
+describe('what a turn spent it on', () => {
+  const usage = (over: Partial<Request['usage']>): Request['usage'] => ({
+    ...EMPTY_USAGE,
+    ...over,
+  });
+
+  const turnOf = (
+    r: Request,
+    invalidations: Invalidation[] = [],
+  ): ReturnType<typeof toTurns>[0] => {
+    const [turn] = toTurns(
+      session({
+        events: [
+          ev({ id: 'p', kind: 'user', at: r.at, title: 'do a thing' }),
+          ev({ id: 'w', kind: 'bash', at: r.at, request: r.id }),
+        ],
+        requests: [r],
+        invalidations,
+      }),
+    );
+    return turn!;
+  };
+
+  const rebuild = (at: string, rewritten: number): Invalidation =>
+    ({ at, cause: 'expiry', rewritten, idleMs: 0 }) as Invalidation;
+
+  it('always sums to the turn cost', () => {
+    const t = turnOf({
+      ...req('r1', '2026-09-12T10:00:00Z', 0),
+      usage: usage({ cacheWrite: 80, output: 15, input: 5 }),
+    });
+    const { rewritten, added, produced, input } = t.ledger;
+    expect(rewritten + added + produced + input).toBe(t.cost);
+  });
+
+  it('calls a cache write growth when nothing was invalidated', () => {
+    const t = turnOf({
+      ...req('r1', '2026-09-12T10:00:00Z', 0),
+      usage: usage({ cacheWrite: 50_000, output: 900 }),
+    });
+    expect(t.ledger.added).toBe(50_000);
+    expect(t.ledger.rewritten).toBe(0);
+    expect(t.why).toBe('added');
+  });
+
+  // The distinction the whole design turns on: the same cache write means
+  // opposite things depending on whether a rebuild happened.
+  it('calls it re-payment when one did', () => {
+    const t = turnOf(
+      { ...req('r1', '2026-09-12T10:00:00Z', 0), usage: usage({ cacheWrite: 50_000 }) },
+      [rebuild('2026-09-12T10:00:00Z', 50_000)],
+    );
+    expect(t.ledger.rewritten).toBe(50_000);
+    expect(t.ledger.added).toBe(0);
+    expect(t.why).toBe('rewritten');
+  });
+
+  // A rebuild is recorded against one request; a turn must never report more
+  // re-payment than it actually wrote.
+  it('never reports more re-paid than was written', () => {
+    const t = turnOf(
+      { ...req('r1', '2026-09-12T10:00:00Z', 0), usage: usage({ cacheWrite: 1_000 }) },
+      [rebuild('2026-09-12T10:00:00Z', 900_000)],
+    );
+    expect(t.ledger.rewritten).toBe(1_000);
+    expect(t.ledger.added).toBe(0);
+  });
+
+  it('names the biggest part, and nothing when there was no cost', () => {
+    const quiet = turnOf({ ...req('r1', '2026-09-12T10:00:00Z', 0), usage: usage({}) });
+    expect(quiet.why).toBeNull();
+
+    const thought = turnOf({
+      ...req('r1', '2026-09-12T10:00:00Z', 0),
+      usage: usage({ cacheWrite: 100, output: 9_000 }),
+    });
+    expect(thought.why).toBe('produced');
+  });
+});
+
+describe('subagents belong to the turn that spawned them', () => {
+  const agent = (toolUseId: string | null, cost: number) =>
+    ({
+      id: `a-${String(toolUseId)}`,
+      type: 'Explore',
+      description: 'look it up',
+      toolUseId,
+      usage: { ...EMPTY_USAGE, cacheWrite: cost },
+    }) as SessionDetail['subagentDetail'][0];
+
+  const spawned = (agents: SessionDetail['subagentDetail']) =>
+    toTurns(
+      session({
+        events: [
+          ev({ id: 'p', kind: 'user', at: '2026-09-12T10:00:00Z', title: 'delegate it' }),
+          ev({ id: 'call', kind: 'agent', at: '2026-09-12T10:00:01Z', toolUseId: 'tu-1' }),
+        ],
+        requests: [],
+        subagentDetail: agents,
+      }),
+    )[0]!;
+
+  it('attributes an agent to the turn holding the call that started it', () => {
+    const t = spawned([agent('tu-1', 900_000)]);
+    expect(t.agents).toHaveLength(1);
+    expect(t.delegated).toBe(900_000);
+    // Delegated spend competes with the rest even though it sits outside cost.
+    expect(t.why).toBe('delegated');
+  });
+
+  // Subagent spend has its own context window and must never join the session's
+  // own total, or every figure in the app double-counts it.
+  it('keeps delegated spend out of the turn cost', () => {
+    const t = spawned([agent('tu-1', 900_000)]);
+    expect(t.cost).toBe(0);
+  });
+
+  it('claims no agent whose spawning call has gone', () => {
+    const t = spawned([agent(null, 500_000), agent('tu-other', 500_000)]);
+    expect(t.agents).toEqual([]);
+    expect(t.delegated).toBe(0);
+  });
+});

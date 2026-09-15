@@ -131,7 +131,6 @@ describe('alert evidence', () => {
     );
     expect(alert?.sessionName).toBe('Demo');
     expect(alert?.sessionPath).toBe('/s1.jsonl');
-    expect(alert?.tab).toBe('timeline');
     // One Event is the whole story, so arriving should select it.
     expect(alert?.eventId).toBe('big');
   });
@@ -148,7 +147,6 @@ describe('alert evidence', () => {
       new Set(),
       NOW,
     );
-    expect(alert?.tab).toBe('cache');
     expect(alert?.evidence.filter((e) => e.label.startsWith('Prefix rebuilt'))).toHaveLength(3);
   });
 

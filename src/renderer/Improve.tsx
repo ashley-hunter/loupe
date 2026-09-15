@@ -23,6 +23,13 @@ const CATEGORY: Record<FindingCategory, { label: string; icon: typeof Database }
 };
 
 /**
+ * Everything worth changing, ranked by what it gives back.
+ *
+ * The only things that cannot live inside a conversation: patterns that span
+ * several of them, and configuration you fix once rather than per turn.
+ */
+
+/**
  * Advice sits alongside the Findings rather than on a screen of its own.
  *
  * The only thing separating the two is whether a token figure exists - an MCP
@@ -50,12 +57,12 @@ const readDismissed = (): Set<string> => {
   }
 };
 
-export function Insights({
+export function Improve({
   sessions,
   onOpen,
 }: {
   sessions: SessionSummary[];
-  onOpen: (session: SessionSummary, tab: Finding['tab']) => void;
+  onOpen: (session: SessionSummary) => void;
 }) {
   const [findings, setFindings] = useState<Finding[] | null>(null);
   const [advice, setAdvice] = useState<Recommendation[]>([]);
@@ -117,7 +124,7 @@ export function Insights({
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
-      <TopBar title="Insights" count={shown.length + (showAdvice ? advice.length : 0)}>
+      <TopBar title="Improve" count={shown.length + (showAdvice ? advice.length : 0)}>
         <Chips
           options={[
             ['all', 'Everything'],
@@ -170,7 +177,7 @@ export function Insights({
             onDismiss={dismiss}
             onOpen={(f) => {
               const s = sessions.find((x) => x.id === f.sessionId);
-              if (s) onOpen(s, f.tab);
+              if (s) onOpen(s);
             }}
           />
         ))}

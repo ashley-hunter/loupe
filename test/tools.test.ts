@@ -239,7 +239,6 @@ describe('subagent spend alerts', () => {
     const [alert] = detectAlerts(withAgents(1_000_000, 3), new Set());
     expect(alert?.kind).toBe('subagent-spend');
     expect(alert?.tokens).toBe(3_000_000);
-    expect(alert?.tab).toBe('agents');
   });
 
   // One per doubling, so crossing 2M does not re-announce at 2.1M and 2.2M.

@@ -114,13 +114,13 @@ async function capture(win: BrowserWindow): Promise<void> {
         if (want === 'sessions') return 'sessions';
         if (want.startsWith('tab:')) {
           const match = ${JSON.stringify(process.env['SHOT_SESSION'] ?? '')};
-          const rows = [...document.querySelectorAll('.trow')];
+          const rows = [...document.querySelectorAll('.crow')];
           const row = match ? rows.find(r => r.textContent.includes(match)) : rows[0];
           if (row) { row.click(); return 'row clicked'; }
           return 'ROW NOT FOUND: ' + match;
         }
         if (want === 'detail') {
-          const row = document.querySelector('.trow');
+          const row = document.querySelector('.crow');
           if (row) { row.click(); return 'opened first session'; }
           return 'NO ROWS';
         }

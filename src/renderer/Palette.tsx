@@ -43,7 +43,7 @@ export function Palette({
   /** The navigable screens, as [id, label] pairs. */
   screens: Array<{ id: string; label: string; go: () => void }>;
   sessions: SessionSummary[];
-  onOpenSession: (s: SessionSummary, tab: SearchHit['tab']) => void;
+  onOpenSession: (s: SessionSummary, eventId?: string) => void;
 }) {
   const [query, setQuery] = useState('');
   const [cursor, setCursor] = useState(0);
@@ -106,12 +106,12 @@ export function Palette({
       .filter((h) => h.kind !== 'session')
       .map((h) => ({
         id: `hit:${h.id}`,
-        group: h.tab === 'files' ? 'Files' : 'Events',
+        group: h.path === undefined ? 'Events' : 'Files',
         label: label(h),
         meta: `${h.kind} · ${h.project} · ${tokens(h.cost)}`,
         run: () => {
           const s = sessions.find((x) => x.id === h.sessionId);
-          if (s) onOpenSession(s, h.tab);
+          if (s) onOpenSession(s, h.eventId);
         },
       }));
 

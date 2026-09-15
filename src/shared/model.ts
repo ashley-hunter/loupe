@@ -125,9 +125,9 @@ export interface Event {
   cost: number | null;
   /** Set when several tool calls shared one Request and their costs cannot be split. */
   sharedCost?: boolean;
-  /** Tool name, for Events that are tool calls. Grouped on by the Tools tab. */
+  /** Tool name, for Events that are tool calls. Rolled up by tool. */
   tool?: string;
-  /** File path, for Events that read or wrote one. Grouped on by the Files tab. */
+  /** File path, for Events that read or wrote one. Rolled up by file. */
   path?: string;
   /** The `tool_use` id, when this Event is one. Links a Subagent to the call that spawned it. */
   toolUseId?: string;
@@ -294,8 +294,6 @@ export interface Finding {
   sessionPath: string;
   sessionName: string;
   project: string;
-  /** Which Detail tab shows the evidence. */
-  tab: 'timeline' | 'cache' | 'files' | 'tools' | 'agents';
   /** Tokens that acting on this would give back. */
   recoverable: number;
   /**
@@ -358,8 +356,6 @@ export interface Alert {
   title: string;
   detail: string;
   tokens: number;
-  /** The tab that shows this Alert's evidence when the Session is opened. */
-  tab: 'timeline' | 'cache' | 'agents';
   /** The Event to select on arrival, when one Event is the whole story. */
   eventId?: string;
   evidence: AlertEvidence[];

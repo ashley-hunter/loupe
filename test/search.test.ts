@@ -94,9 +94,13 @@ describe('search', () => {
     expect(search([hidden], 'deep').total).toBe(1);
   });
 
-  it('sends file hits to the Files tab and everything else to the Timeline', () => {
-    expect(search([s], 'auth', 'read').hits[0]?.tab).toBe('files');
-    expect(search([s], 'auth', 'bash').hits[0]?.tab).toBe('timeline');
+  // What a hit carries is the Event it is, so opening it can land on that
+  // moment in the conversation rather than on a screen that no longer exists.
+  it('carries the event it matched, and the file when there is one', () => {
+    const read = search([s], 'auth', 'read').hits[0];
+    expect(read?.eventId).toBeDefined();
+    expect(read?.path).toBeDefined();
+    expect(search([s], 'auth', 'bash').hits[0]?.path).toBeUndefined();
   });
 });
 

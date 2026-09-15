@@ -14,6 +14,10 @@ export interface SearchHit {
   id: string;
   /** The Event kind, or `session` when the Session's own name matched. */
   kind: EventKind | 'session';
+  /** The Event this hit is, so opening it can land on that moment. */
+  eventId?: string;
+  /** The file, when the hit is one. */
+  path?: string;
   title: string;
   /** What the Event added to the context. Null when it could not be Measured. */
   cost: number | null;
@@ -22,8 +26,6 @@ export interface SearchHit {
   sessionPath: string;
   sessionName: string;
   project: string;
-  /** Which Detail tab to open on. */
-  tab: 'timeline' | 'files';
 }
 
 export interface SearchResult {
@@ -63,7 +65,6 @@ export function search(
         sessionPath: s.path,
         sessionName: s.name,
         project: s.project,
-        tab: 'timeline',
       });
     }
 
@@ -74,6 +75,8 @@ export function search(
       all.push({
         id: `${s.id}:${e.id}`,
         kind: e.kind,
+        eventId: e.id,
+        ...(e.path === undefined ? {} : { path: e.path }),
         title: e.title,
         cost: e.cost,
         at: e.at,
@@ -81,7 +84,6 @@ export function search(
         sessionPath: s.path,
         sessionName: s.name,
         project: s.project,
-        tab: e.path ? 'files' : 'timeline',
       });
     }
   }

@@ -75,7 +75,6 @@ describe('re-anchoring', () => {
     expect(f?.recoverable).toBe(1_200_000);
     expect(f?.text).toContain('3 times');
     expect(f?.text).toContain('1.20M');
-    expect(f?.tab).toBe('cache');
   });
 
   it('stays quiet about a single rebuild, which is not a pattern', () => {
@@ -100,7 +99,6 @@ describe('duplicate reads', () => {
     expect(f?.category).toBe('duplication');
     expect(f?.recoverable).toBe(60_000);
     expect(f?.text).toContain('read 3 times');
-    expect(f?.tab).toBe('files');
   });
 
   it('says nothing about a file read once', () => {

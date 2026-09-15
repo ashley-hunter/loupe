@@ -71,6 +71,10 @@ export interface DayRollup {
   /** Null when nothing was sent that day, so the chart shows a gap not a zero. */
   cacheHit: number | null;
   sessions: number;
+  /** The day's own usage, so a chart can split it rather than only total it. */
+  usage: Usage;
+  /** What Subagents spent that day. Outside `newTokens`, as everywhere else. */
+  delegated: number;
 }
 
 /**
@@ -100,6 +104,8 @@ export function byDay(sessions: SessionSummary[], days = 14, today = new Date())
       newTokens: newTokens(usage),
       cacheHit: group.length === 0 ? null : cacheHitRate(usage),
       sessions: group.length,
+      usage,
+      delegated: group.reduce((n, s) => n + newTokens(s.subagentUsage), 0),
     });
   }
   return out;

@@ -1,31 +1,21 @@
 import {
-  Activity,
   ChartColumn,
   Lightbulb,
-  List,
+  MessagesSquare,
   Wrench,
-  Search as SearchIcon,
   SlidersVertical,
   type LucideIcon,
 } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import type { IndexResult } from '../main/catalogue.js';
-import type {
-  Alert,
-  Finding,
-  SessionDetail,
-  SessionSummary,
-  UsageSample,
-} from '../shared/model.js';
+import type { Alert, SessionDetail, SessionSummary, UsageSample } from '../shared/model.js';
 import { Detail } from './Detail.js';
 import { Analytics } from './Analytics.js';
-import { Insights } from './Insights.js';
-import { Live } from './Live.js';
+import { Improve } from './Improve.js';
+import { Conversations } from './Conversations.js';
 import { Palette } from './Palette.js';
-import { Search } from './Search.js';
 import { Settings } from './Settings.js';
 import { Tools } from './Tools.js';
-import { Sessions } from './Sessions.js';
 import { duration } from './format.js';
 import type { Prefs } from '../shared/prefs.js';
 import iconUrl from './icon.png';
@@ -37,14 +27,12 @@ import { TopBar } from './ui/TopBar.js';
 import { useWidth } from './useWidth.js';
 
 type Screen =
-  | { at: 'sessions' }
-  | { at: 'insights' }
+  | { at: 'conversations' }
   | { at: 'analytics' }
-  | { at: 'live' }
-  | { at: 'search' }
+  | { at: 'improve' }
   | { at: 'tools' }
   | { at: 'settings' }
-  | { at: 'detail'; session: SessionDetail; tab: string; eventId?: string };
+  | { at: 'detail'; session: SessionDetail; eventId?: string };
 
 /** Sidebar entries. `ready` marks the ones that have their data yet. */
 interface NavItem {
@@ -59,40 +47,36 @@ interface NavItem {
  * stroke — its `folder` path matches lucide-react's byte for byte.
  */
 const NAV: NavItem[] = [
-  { id: 'sessions', label: 'Sessions', icon: List, ready: true },
-  { id: 'search', label: 'Search', icon: SearchIcon, ready: true },
-  { id: 'live', label: 'Live', icon: Activity, ready: true },
+  { id: 'conversations', label: 'Conversations', icon: MessagesSquare, ready: true },
   { id: 'analytics', label: 'Analytics', icon: ChartColumn, ready: true },
-  { id: 'insights', label: 'Insights', icon: Lightbulb, ready: true },
+  { id: 'improve', label: 'Improve', icon: Lightbulb, ready: true },
   { id: 'tools', label: 'Tools', icon: Wrench, ready: true },
   { id: 'settings', label: 'Settings', icon: SlidersVertical, ready: true },
 ];
 
 /**
- * The number beside a nav item: unread alerts on Live, otherwise a count of
- * what that screen holds. Undefined means no badge at all.
+ * The number beside a nav item: unread alerts if there are any, otherwise what
+ * is running, otherwise how many conversations there are. Undefined means no
+ * badge at all.
  */
 function badgeFor(
   id: string,
   sessions: SessionSummary[] | undefined,
   alerts: number,
 ): number | undefined {
-  if (id === 'live') {
-    if (alerts > 0) return alerts;
-    const running = sessions?.filter((s) => s.status === 'active').length ?? 0;
-    return running > 0 ? running : undefined;
-  }
-  if (id === 'sessions') return sessions?.length;
-  return undefined;
+  if (id !== 'conversations') return undefined;
+  // What is running beats how many exist: a count that never changes is not
+  // worth the ink, and a running conversation is the reason to look.
+  if (alerts > 0) return alerts;
+  const running = sessions?.filter((s) => s.status === 'active').length ?? 0;
+  return running > 0 ? running : sessions?.length;
 }
 
 /** Which screen each nav id opens. A lookup rather than a ternary chain. */
 const SCREEN_FOR: Record<string, Screen> = {
-  sessions: { at: 'sessions' },
-  search: { at: 'search' },
-  live: { at: 'live' },
+  conversations: { at: 'conversations' },
   analytics: { at: 'analytics' },
-  insights: { at: 'insights' },
+  improve: { at: 'improve' },
   tools: { at: 'tools' },
   settings: { at: 'settings' },
 };
@@ -119,7 +103,15 @@ export const ICON = { size: 15, strokeWidth: 1.7 } as const;
 export function App() {
   const [index, setIndex] = useState<IndexResult | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [screen, setScreen] = useState<Screen>({ at: 'sessions' });
+  const [screen, setScreen] = useState<Screen>({ at: 'conversations' });
+  /**
+   * What the Conversations list is narrowed to.
+   *
+   * Held here rather than inside the list because Analytics sets it: clicking a
+   * project on a chart narrows this and moves you there, which is what makes a
+   * chart a door rather than a picture.
+   */
+  const [filter, setFilter] = useState('');
   const [usage, setUsage] = useState<UsageSample | null>(null);
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [palette, setPalette] = useState(false);
@@ -140,7 +132,8 @@ export function App() {
         setPalette((v) => !v);
       } else if (key === 'f') {
         e.preventDefault();
-        setScreen({ at: 'search' });
+        setScreen({ at: 'conversations' });
+        document.getElementById('conversation-filter')?.focus();
       }
     };
     window.addEventListener('keydown', onKey);
@@ -197,23 +190,33 @@ export function App() {
       });
   }, []);
 
-  const open = useCallback((s: SessionSummary, tab: Finding['tab'] = 'timeline') => {
+  const open = useCallback((s: SessionSummary, eventId?: string) => {
     void window.loupe.session(s.path).then((detail) => {
-      if (detail) setScreen({ at: 'detail', session: detail, tab });
+      if (!detail) return;
+      setScreen({
+        at: 'detail',
+        session: detail,
+        ...(eventId === undefined ? {} : { eventId }),
+      });
     });
   }, []);
 
-  /** Land on the evidence for an Alert: its Session, its tab, its Event. */
+  /** Land on the evidence for an Alert: its conversation, at its moment. */
   const openAlert = useCallback((alert: Alert) => {
     void window.loupe.session(alert.sessionPath).then((detail) => {
       if (!detail) return;
       setScreen({
         at: 'detail',
         session: detail,
-        tab: alert.tab,
         ...(alert.eventId !== undefined ? { eventId: alert.eventId } : {}),
       });
     });
+  }, []);
+
+  /** A chart handing its selection to the list, and taking you with it. */
+  const narrow = useCallback((query: string) => {
+    setFilter(query);
+    setScreen({ at: 'conversations' });
   }, []);
 
   // Preferences are changed from more than one place now, so saving belongs
@@ -224,7 +227,7 @@ export function App() {
   }, []);
 
   const back = useCallback(() => {
-    setScreen({ at: 'sessions' });
+    setScreen({ at: 'conversations' });
   }, []);
 
   // Clicking the native notification lands on that Alert's evidence.
@@ -241,7 +244,7 @@ export function App() {
   );
 
   const go = useCallback((id: string) => {
-    setScreen(SCREEN_FOR[id] ?? { at: 'sessions' });
+    setScreen(SCREEN_FOR[id] ?? { at: 'conversations' });
   }, []);
 
   return (
@@ -326,7 +329,10 @@ export function App() {
                     style={{
                       marginLeft: 'auto',
                       fontSize: 10,
-                      color: n.id === 'live' && alerts.length > 0 ? 'var(--err)' : 'var(--faint)',
+                      color:
+                        n.id === 'conversations' && alerts.length > 0
+                          ? 'var(--err)'
+                          : 'var(--faint)',
                     }}
                   >
                     {count}
@@ -395,9 +401,12 @@ export function App() {
           onOpen={open}
           onBack={back}
           onDetail={(session) => {
-            setScreen({ at: 'detail', session, tab: 'timeline' });
+            setScreen({ at: 'detail', session });
           }}
           onOpenAlert={openAlert}
+          filter={filter}
+          onFilter={setFilter}
+          onNarrow={narrow}
           onDismissAlerts={() => {
             setAlerts([]);
           }}
@@ -474,11 +483,16 @@ interface ScreenProps {
   theme: 'light' | 'dark' | 'system';
   onTheme: (t: 'light' | 'dark' | 'system') => void;
   onPrefs: (p: Prefs) => void;
-  onOpen: (s: SessionSummary, tab?: Finding['tab']) => void;
+  onOpen: (s: SessionSummary, eventId?: string) => void;
   onBack: () => void;
   onDetail: (detail: SessionDetail) => void;
   onOpenAlert: (alert: Alert) => void;
   onDismissAlerts: () => void;
+  /** What the Conversations list is narrowed to, and how to change it. */
+  filter: string;
+  onFilter: (next: string) => void;
+  /** Narrow the list and go there, which is how a chart becomes a door. */
+  onNarrow: (query: string) => void;
 }
 
 /**
@@ -491,19 +505,6 @@ interface ScreenProps {
 function CurrentScreen(p: ScreenProps) {
   const { screen, index, error } = p;
 
-  if (screen.at === 'live') {
-    return (
-      <Live
-        alerts={p.alerts}
-        onDismissAlerts={p.onDismissAlerts}
-        usage={p.usage}
-        onOpen={p.onDetail}
-        onOpenAlert={p.onOpenAlert}
-        collapseAbove={p.prefs.collapseAbove}
-        grouped={p.prefs.groupByProject}
-      />
-    );
-  }
   if (screen.at === 'tools') {
     return <Tools />;
   }
@@ -518,7 +519,6 @@ function CurrentScreen(p: ScreenProps) {
       <Detail
         session={screen.session}
         onBack={p.onBack}
-        initialTab={screen.tab}
         {...(screen.eventId !== undefined ? { initialEventId: screen.eventId } : {})}
         collapseAbove={p.prefs.collapseAbove}
       />
@@ -539,22 +539,21 @@ function CurrentScreen(p: ScreenProps) {
 
   const sessions = index.sessions;
   switch (screen.at) {
-    case 'sessions':
+    case 'conversations':
       return (
-        <Sessions
+        <Conversations
           sessions={sessions}
           onOpen={p.onOpen}
-          grouped={p.prefs.groupByProject}
-          onGrouped={(v) => {
-            p.onPrefs({ ...p.prefs, groupByProject: v });
-          }}
+          filter={p.filter}
+          onFilter={p.onFilter}
+          alerts={p.alerts}
+          onOpenAlert={p.onOpenAlert}
+          onDismissAlerts={p.onDismissAlerts}
         />
       );
-    case 'search':
-      return <Search sessions={sessions} onOpen={p.onOpen} />;
     case 'analytics':
-      return <Analytics sessions={sessions} usage={p.usage} onOpen={p.onOpen} />;
-    case 'insights':
-      return <Insights sessions={sessions} onOpen={p.onOpen} />;
+      return <Analytics sessions={sessions} usage={p.usage} onFilter={p.onNarrow} />;
+    case 'improve':
+      return <Improve sessions={sessions} onOpen={p.onOpen} />;
   }
 }
