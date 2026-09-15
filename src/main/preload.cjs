@@ -34,6 +34,28 @@ contextBridge.exposeInMainWorld('loupe', {
     ipcRenderer.on('loupe:open-alert', handler);
     return () => ipcRenderer.off('loupe:open-alert', handler);
   },
+  cacheClocks: () => ipcRenderer.invoke('loupe:cache-clock'),
+  onCacheClocks: (fn) => {
+    const handler = (_e, clocks) => fn(clocks);
+    ipcRenderer.on('loupe:cache-clock', handler);
+    return () => ipcRenderer.off('loupe:cache-clock', handler);
+  },
+  toolsConfig: () => ipcRenderer.invoke('loupe:tools-config'),
+  setToolsConfig: (config) => ipcRenderer.invoke('loupe:tools-config-set', config),
+  runAction: (kind, sessionId) => ipcRenderer.invoke('loupe:run-action', kind, sessionId),
+  runs: () => ipcRenderer.invoke('loupe:runs'),
+  onRun: (fn) => {
+    const handler = (_e, record) => fn(record);
+    ipcRenderer.on('loupe:run', handler);
+    return () => ipcRenderer.off('loupe:run', handler);
+  },
+  startup: () => ipcRenderer.invoke('loupe:startup'),
+  threshold: () => ipcRenderer.invoke('loupe:threshold'),
+  onOpenTools: (fn) => {
+    const handler = () => fn();
+    ipcRenderer.on('loupe:open-tools', handler);
+    return () => ipcRenderer.off('loupe:open-tools', handler);
+  },
   updateState: () => ipcRenderer.invoke('loupe:update-state'),
   checkForUpdates: () => ipcRenderer.invoke('loupe:update-check'),
   installUpdate: () => ipcRenderer.invoke('loupe:update-install'),

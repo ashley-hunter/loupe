@@ -16,6 +16,7 @@ const FILTERS: Array<[EventKind | 'session' | 'all', string]> = [
   ['read', 'Reads'],
   ['edit', 'Edits'],
   ['bash', 'Commands'],
+  ['inject', 'Injected'],
   ['user', 'Prompts'],
   ['mcp', 'MCP'],
   ['agent', 'Subagents'],

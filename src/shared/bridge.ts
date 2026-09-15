@@ -12,6 +12,14 @@ import type { SearchResult } from '../main/search.js';
 import type { UpdateState, UpdateStatus } from '../main/updates.js';
 import type { EventKind } from './model.js';
 import type { ProjectRollup } from './rollup.js';
+import type {
+  ActionKind,
+  CacheClock,
+  RunRecord,
+  StartupCost,
+  Threshold,
+  ToolsConfig,
+} from './tools.js';
 
 /** What the renderer can ask the main process for. Nothing else crosses the boundary. */
 export interface LoupeBridge {
@@ -39,6 +47,25 @@ export interface LoupeBridge {
   setPollInterval(minutes: number): Promise<void>;
   /** Subscribe to poller readings. Returns an unsubscribe function. */
   onUsageSample(fn: (s: UsageSample) => void): () => void;
+  /** A cache deadline per running Session. Empty when none has a prefix worth watching. */
+  cacheClocks(): Promise<CacheClock[]>;
+  /** Pushed on every change to any running Session, so the countdowns stay true. */
+  onCacheClocks(fn: (clocks: CacheClock[]) => void): () => void;
+  /** What Loupe is allowed to do unattended. */
+  toolsConfig(): Promise<ToolsConfig>;
+  setToolsConfig(config: ToolsConfig): Promise<void>;
+  /** Run an action against one running Session now, from a button. */
+  runAction(kind: ActionKind, sessionId: string): Promise<RunRecord>;
+  /** Everything Loupe has run or declined to run, newest first. */
+  runs(): Promise<RunRecord[]>;
+  onRun(fn: (record: RunRecord) => void): () => void;
+  /** What starting a Session costs in each project. */
+  startup(): Promise<StartupCost[]>;
+  /** The context size compaction has been seen at, measured from your own history. */
+  threshold(): Promise<Threshold>;
+  /** An expiry notification was clicked; show the Tools screen. */
+  onOpenTools(fn: () => void): () => void;
+
   /** The running version and whatever the updater is currently doing. */
   updateState(): Promise<UpdateState>;
   /** Ask GitHub now rather than waiting for the next scheduled check. */

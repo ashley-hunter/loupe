@@ -3,6 +3,7 @@ import { Database, TriangleAlert } from 'lucide-react';
 import type { Alert, Event, SessionDetail } from '../shared/model.js';
 import { toTurns, type Turn } from '../shared/turns.js';
 import { ICON } from './App.js';
+import { Markdown } from './ui/Markdown.js';
 import { KIND } from './kinds.js';
 import { clock, percent, tokens } from './format.js';
 import { VirtualRows } from './ui/VirtualRows.js';
@@ -78,19 +79,35 @@ function TurnThread({ turn, peak, alerts }: { turn: Turn; peak: number; alerts: 
   return (
     <div className="thread">
       {turn.rebuilds.map((r, i) => (
-        <div key={i} className="context-note">
+        // A compaction stays quiet: the context shrank, which is the cache
+        // working rather than money lost. A rebuild is the opposite - this is
+        // the turn that paid to write the whole prefix out again, and it is the
+        // largest avoidable cost in the corpus, so it is drawn like one.
+        <div
+          key={i}
+          className="context-note"
+          data-cost={r.cause === 'compaction' ? undefined : 'true'}
+        >
           <Database {...ICON} aria-hidden />
-          <span>
-            {r.cause === 'compaction' ? 'Context compacted' : 'Cache rebuilt'} ·{' '}
-            {tokens(r.rewritten)} rewritten because {CAUSE[r.cause]}
-          </span>
+          {r.cause === 'compaction' ? (
+            <span>Context compacted · {tokens(r.rewritten)} rewritten</span>
+          ) : (
+            <>
+              <span className="mono cost-figure">{tokens(r.rewritten)}</span>
+              <span>
+                rewritten here - this prompt paid to rebuild the cache because {CAUSE[r.cause]}
+              </span>
+            </>
+          )}
         </div>
       ))}
 
       {turn.prompt && (
         <div className="bubble-row" data-side="you">
           <div className="bubble" data-side="you">
-            <div className="bubble-text selectable">{turn.prompt.body ?? turn.prompt.title}</div>
+            <div className="bubble-text selectable">
+              <Markdown text={turn.prompt.body ?? turn.prompt.title} />
+            </div>
           </div>
           <div className="bubble-meta" data-side="you">
             <span className="mono">{clock(turn.prompt.at)}</span>
@@ -101,7 +118,9 @@ function TurnThread({ turn, peak, alerts }: { turn: Turn; peak: number; alerts: 
       {spoken.map((e) => (
         <div key={e.id} className="bubble-row" data-side="claude">
           <div className="bubble" data-side="claude">
-            <div className="bubble-text selectable">{e.body ?? e.title}</div>
+            <div className="bubble-text selectable">
+              <Markdown text={e.body ?? e.title} />
+            </div>
           </div>
           <div className="bubble-meta" data-side="claude">
             <span className="mono">{clock(e.at)}</span>

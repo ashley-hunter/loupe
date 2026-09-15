@@ -234,6 +234,8 @@ export function SubagentsTab({
         part of it.
       </p>
 
+      <ByType agents={agents} spent={spent} />
+
       <div style={{ border: '1px solid var(--line)', borderRadius: 6, overflow: 'hidden' }}>
         <div
           className="thead"
@@ -251,6 +253,63 @@ export function SubagentsTab({
         ))}
       </div>
     </Pad>
+  );
+}
+
+/**
+ * What each kind of agent cost, before the individual runs.
+ *
+ * Delegated work is the largest thing in the corpus and the list below is
+ * ordered by when it happened, which answers "what ran" but never "what is
+ * expensive". One heavy agent type repeated twenty times looks like twenty
+ * ordinary rows until it is totalled.
+ */
+function ByType({ agents, spent }: { agents: Subagent[]; spent: number }) {
+  const totals = new Map<string, { n: number; cost: number }>();
+  for (const a of agents) {
+    const at = totals.get(a.type) ?? { n: 0, cost: 0 };
+    at.n++;
+    at.cost += newTokens(a.usage);
+    totals.set(a.type, at);
+  }
+
+  const rows = [...totals.entries()].sort((a, b) => b[1].cost - a[1].cost);
+  // One type is not a breakdown of anything.
+  if (rows.length < 2) return null;
+
+  return (
+    <div style={{ marginBottom: 14 }}>
+      {rows.map(([type, t]) => (
+        <div
+          key={type}
+          style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '3px 0' }}
+        >
+          <span style={{ fontSize: 12.5, width: 150, flex: 'none' }} className="truncate">
+            {type}
+          </span>
+          <span className="mono" style={{ fontSize: 11, color: 'var(--faint)', width: 58 }}>
+            {t.n}
+            {t.n === 1 ? ' run' : ' runs'}
+          </span>
+          <div
+            style={{ flex: 1, height: 3, background: 'var(--track)', borderRadius: 2 }}
+            aria-hidden
+          >
+            <div
+              style={{
+                width: `${String(spent === 0 ? 0 : (t.cost / spent) * 100)}%`,
+                height: '100%',
+                background: 'var(--accent)',
+                borderRadius: 2,
+              }}
+            />
+          </div>
+          <span className="mono" style={{ fontSize: 11.5, width: 76, textAlign: 'right' }}>
+            {tokens(t.cost)}
+          </span>
+        </div>
+      ))}
+    </div>
   );
 }
 

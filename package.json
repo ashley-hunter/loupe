@@ -48,7 +48,9 @@
     "electron-updater": "^6.8.9",
     "lucide-react": "^1.45.0",
     "react": "^19.0.0",
-    "react-dom": "^19.0.0"
+    "react-dom": "^19.0.0",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1"
   },
   "productName": "Loupe",
   "description": "A token inspector for Claude Code — where your context, cache and allowance actually went",

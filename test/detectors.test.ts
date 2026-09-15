@@ -190,3 +190,147 @@ describe('noisy commands', () => {
     expect(found).toEqual([]);
   });
 });
+
+/** A file Claude Code put back into the context after an edit to it. */
+const reinjected = (id: string, path: string, chars: number): Event => ({
+  id,
+  kind: 'inject',
+  at: '2026-09-12T10:00:00Z',
+  title: `File re-sent after an edit: ${path}`,
+  subtitle: 'edited_text_file',
+  body: 'x'.repeat(chars),
+  depth: 0,
+  cost: null,
+  path,
+});
+
+describe('edited files put back into the context', () => {
+  it('counts the repeats, not the first copy', () => {
+    const found = findAll([
+      session({
+        events: [
+          reinjected('a', '/demo/big.ts', 40_000),
+          reinjected('b', '/demo/big.ts', 40_000),
+          reinjected('c', '/demo/big.ts', 40_000),
+        ],
+      }),
+    ]).filter((f) => f.kind === 'edit-reinjected');
+
+    expect(found).toHaveLength(1);
+    // 120k chars is about 30k tokens; two copies of the three are the waste.
+    expect(found[0]?.recoverable).toBe(20_000);
+    expect(found[0]?.text).toContain('re-sent 3 times');
+  });
+
+  it('says nothing about a file re-sent once', () => {
+    const found = findAll([session({ events: [reinjected('a', '/demo/big.ts', 200_000)] })]).filter(
+      (f) => f.kind === 'edit-reinjected',
+    );
+    expect(found).toEqual([]);
+  });
+
+  // The whole point: this arrives as an injection, so the read-based detector
+  // must not also claim it.
+  it('is not confused with a duplicate read', () => {
+    const found = findAll([
+      session({
+        events: [
+          reinjected('a', '/demo/big.ts', 200_000),
+          reinjected('b', '/demo/big.ts', 200_000),
+        ],
+      }),
+    ]);
+    expect(found.some((f) => f.kind === 'duplicate-read')).toBe(false);
+    expect(found.some((f) => f.kind === 'edit-reinjected')).toBe(true);
+  });
+});
+
+describe('screenshots returned by a tool', () => {
+  const shot = (id: string, cost: number): Event => ({
+    id,
+    kind: 'mcp',
+    at: '2026-09-12T10:00:00Z',
+    title: 'take_screenshot',
+    depth: 0,
+    cost,
+    images: 1,
+    tool: 'mcp__chrome__take_screenshot',
+  });
+
+  // These have no path, so the extension test never saw them.
+  it('counts a screenshot even though it has no filename', () => {
+    const found = findAll([session({ events: [shot('a', 12_000), shot('b', 12_000)] })]).filter(
+      (f) => f.kind === 'binary-read',
+    );
+
+    expect(found).toHaveLength(1);
+    expect(found[0]?.recoverable).toBe(24_000);
+    expect(found[0]?.text).toContain('2 screenshots');
+  });
+
+  it('counts images read from disk and screenshots together', () => {
+    const [found] = findAll([
+      session({ events: [read('r', '/demo/shot.png', 15_000), shot('a', 15_000)] }),
+    ]).filter((f) => f.kind === 'binary-read');
+
+    expect(found?.recoverable).toBe(30_000);
+    expect(found?.text).toContain('1 image or PDF read and 1 screenshot');
+  });
+
+  it('ignores a tool call that returned no image', () => {
+    const found = findAll([session({ events: [{ ...shot('a', 90_000), images: 0 }] })]).filter(
+      (f) => f.kind === 'binary-read',
+    );
+    expect(found).toEqual([]);
+  });
+});
+
+/**
+ * Tool calls that shared one Request.
+ *
+ * A Request issuing several calls repeats its whole cost on each of them and
+ * flags them shared, so adding them up multiplies the figure by however many
+ * ran together. This is the shape that made screenshots read double.
+ */
+describe('pictures that shared a request', () => {
+  const shared = (id: string, request: string, cost: number, path?: string): Event => ({
+    id,
+    kind: path === undefined ? 'mcp' : 'read',
+    at: '2026-09-12T10:00:00Z',
+    title: path ?? 'take_screenshot',
+    depth: 0,
+    cost,
+    sharedCost: true,
+    request: request as NonNullable<Event['request']>,
+    ...(path === undefined ? { images: 1 } : { path, tool: 'Read' }),
+  });
+
+  it('counts one request once, however many screenshots it took', () => {
+    const [found] = findAll([
+      session({ events: [shared('a', 'r1', 30_000), shared('b', 'r1', 30_000)] }),
+    ]).filter((f) => f.kind === 'binary-read');
+
+    // Both carry the Request's full cost; the Request cost 30k, not 60k.
+    expect(found?.recoverable).toBe(30_000);
+    expect(found?.text).toContain('2 screenshots');
+  });
+
+  it('does not count a request twice for holding both a read and a screenshot', () => {
+    const [found] = findAll([
+      session({
+        events: [shared('a', 'r1', 40_000, '/demo/shot.png'), shared('b', 'r1', 40_000)],
+      }),
+    ]).filter((f) => f.kind === 'binary-read');
+
+    expect(found?.recoverable).toBe(40_000);
+    expect(found?.text).toContain('1 image or PDF read and 1 screenshot');
+  });
+
+  it('still adds separate requests together', () => {
+    const [found] = findAll([
+      session({ events: [shared('a', 'r1', 30_000), shared('b', 'r2', 30_000)] }),
+    ]).filter((f) => f.kind === 'binary-read');
+
+    expect(found?.recoverable).toBe(60_000);
+  });
+});

@@ -1,6 +1,12 @@
-import { Check, Database, Copy, Layers, RefreshCcw } from 'lucide-react';
+import { Check, Database, Copy, Info, Layers, RefreshCcw } from 'lucide-react';
 import { useMemo, useState } from 'react';
-import type { Finding, FindingCategory, FindingKind, SessionSummary } from '../shared/model.js';
+import type {
+  Finding,
+  FindingCategory,
+  FindingKind,
+  Recommendation,
+  SessionSummary,
+} from '../shared/model.js';
 import { ICON } from './App.js';
 import { tokens } from './format.js';
 import { useAsync } from './useAsync.js';
@@ -15,6 +21,20 @@ const CATEGORY: Record<FindingCategory, { label: string; icon: typeof Database }
   cache: { label: 'Cache', icon: Database },
   behaviour: { label: 'Behaviour', icon: RefreshCcw },
 };
+
+/**
+ * Advice sits alongside the Findings rather than on a screen of its own.
+ *
+ * The only thing separating the two is whether a token figure exists - an MCP
+ * server's schema never appears in a Transcript, so its cost cannot be
+ * Measured. That is a fact about the evidence, not a different question being
+ * asked: both answer "what should I change?". Splitting them put the ones
+ * without a number on a screen nobody opened, which is a worse answer to
+ * "these rank badly" than ranking them properly.
+ */
+type Filter = FindingCategory | 'all' | 'advice';
+
+const FILTERS = ['all', 'context', 'duplication', 'cache', 'behaviour', 'advice'] as const;
 
 /**
  * Dismissals live in the browser store rather than on disk: they are a personal
@@ -38,11 +58,16 @@ export function Insights({
   onOpen: (session: SessionSummary, tab: Finding['tab']) => void;
 }) {
   const [findings, setFindings] = useState<Finding[] | null>(null);
+  const [advice, setAdvice] = useState<Recommendation[]>([]);
   const [dismissed, setDismissed] = useState<Set<string>>(readDismissed);
-  const [category, setCategory] = useState<FindingCategory | 'all'>('all');
+  const [category, setCategory] = useState<Filter>('all');
 
   const loaded = useAsync(async () => {
-    setFindings(await window.loupe.findings());
+    // Both in one pass: they read the same parsed Sessions, and waiting for the
+    // slower of the two beats drawing the screen twice.
+    const [f, a] = await Promise.all([window.loupe.findings(), window.loupe.advice()]);
+    setFindings(f);
+    setAdvice(a);
     return true;
   });
 
@@ -69,20 +94,30 @@ export function Insights({
     () => (findings ?? []).filter((f) => !dismissed.has(f.id)),
     [findings, dismissed],
   );
-  const shown = live.filter((f) => category === 'all' || f.category === category);
+  const shown =
+    category === 'advice' ? [] : live.filter((f) => category === 'all' || f.category === category);
+  const showAdvice = category === 'all' || category === 'advice';
   const recoverable = shown.reduce((n, f) => n + f.recoverable, 0);
+  // Injected context carries no usage of its own, so its share of the total is
+  // counted from content length. Saying "measured" over the whole figure while
+  // part of it is an estimate would be the overclaim this app exists to catch.
+  const estimates = shown.filter((f) => f.estimated === true).length;
 
   if (loaded.status === 'failed') {
     return <Failed what="look for findings" error={loaded.error} />;
   }
   if (!findings) return <Empty>Reading transcripts…</Empty>;
 
-  const counts = (c: FindingCategory | 'all'): number =>
-    c === 'all' ? live.length : live.filter((f) => f.category === c).length;
+  const counts = (c: Filter): number =>
+    c === 'all'
+      ? live.length + advice.length
+      : c === 'advice'
+        ? advice.length
+        : live.filter((f) => f.category === c).length;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
-      <TopBar title="Insights" count={shown.length}>
+      <TopBar title="Insights" count={shown.length + (showAdvice ? advice.length : 0)}>
         <Chips
           options={[
             ['all', 'Everything'],
@@ -90,14 +125,10 @@ export function Insights({
             ['duplication', 'Duplication'],
             ['cache', 'Cache'],
             ['behaviour', 'Behaviour'],
+            ['advice', 'Advice'],
           ]}
           value={category}
-          counts={Object.fromEntries(
-            (['all', 'context', 'duplication', 'cache', 'behaviour'] as const).map((c) => [
-              c,
-              counts(c),
-            ]),
-          )}
+          counts={Object.fromEntries(FILTERS.map((c) => [c, counts(c)]))}
           onChange={setCategory}
         />
 
@@ -119,11 +150,17 @@ export function Insights({
 
       <div style={{ overflow: 'auto', minHeight: 0, flex: 1, padding: 16 }}>
         <p style={{ color: 'var(--dim)', margin: '0 0 14px', maxWidth: 640, lineHeight: 1.5 }}>
-          {shown.length === 0
+          {shown.length === 0 && advice.length === 0
             ? 'Nothing to report.'
-            : `${tokens(recoverable)} tokens recoverable across ${shown.length} findings. Every
-               figure is measured from your transcripts; the wording is fixed, so nothing here
-               was generated.`}
+            : shown.length === 0
+              ? 'No measurable findings. What is below carries no token figure.'
+              : `${tokens(recoverable)} tokens recoverable across ${shown.length} findings. The
+                 wording is fixed, so nothing here was generated. Every figure is measured from
+                 your transcripts${
+                   estimates === 0
+                     ? ''
+                     : `, except ${estimates} marked "about": injected context carries no usage of its own, so those are counted from how long it is`
+                 }.`}
         </p>
 
         {groupByKind(shown).map(([kind, group]) => (
@@ -138,7 +175,22 @@ export function Insights({
           />
         ))}
 
-        {shown.length === 0 && findings.length > 0 && (
+        {showAdvice && advice.length > 0 && (
+          <section style={{ marginTop: shown.length > 0 ? 22 : 0 }}>
+            <div className="eyebrow" style={{ marginBottom: 6 }}>
+              Not costable
+            </div>
+            <p style={{ color: 'var(--faint)', fontSize: 11.5, margin: '0 0 10px', maxWidth: 640 }}>
+              Worth changing, but the saving cannot be measured from a transcript. These carry no
+              token figure and are deliberately kept out of the total above.
+            </p>
+            {advice.map((r) => (
+              <Advice key={r.id} recommendation={r} />
+            ))}
+          </section>
+        )}
+
+        {shown.length === 0 && !showAdvice && findings.length > 0 && (
           <div style={{ color: 'var(--faint)' }}>
             {dismissed.size > 0 ? 'All findings dismissed.' : 'No findings in this category.'}
           </div>
@@ -270,6 +322,35 @@ function Group({
           </div>
         </div>
       ))}
+    </div>
+  );
+}
+
+/** A Recommendation. Deliberately has no number where a Finding has one. */
+function Advice({ recommendation: r }: { recommendation: Recommendation }) {
+  return (
+    <div
+      style={{
+        border: '1px solid var(--line)',
+        borderRadius: 8,
+        padding: '12px 14px',
+        marginBottom: 10,
+        background: 'var(--panel)',
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+        <Info {...ICON} style={{ color: 'var(--dim)', flex: 'none' }} aria-hidden />
+        <span style={{ fontSize: 12.5, fontWeight: 600 }}>{r.title}</span>
+        <span className="mono" style={{ marginLeft: 'auto', color: 'var(--faint)', fontSize: 11 }}>
+          not costable
+        </span>
+      </div>
+      <p style={{ margin: '0 0 7px', lineHeight: 1.55, maxWidth: 640, color: 'var(--dim)' }}>
+        {r.text}
+      </p>
+      <div className="mono" style={{ fontSize: 11, color: 'var(--faint)' }}>
+        {r.detail}
+      </div>
     </div>
   );
 }

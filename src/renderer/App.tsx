@@ -1,10 +1,9 @@
 import {
   Activity,
-  Bell,
   ChartColumn,
   Lightbulb,
-  Sparkles,
   List,
+  Wrench,
   Search as SearchIcon,
   SlidersVertical,
   type LucideIcon,
@@ -25,8 +24,7 @@ import { Live } from './Live.js';
 import { Palette } from './Palette.js';
 import { Search } from './Search.js';
 import { Settings } from './Settings.js';
-import { Alerts as AlertsScreen } from './Alerts.js';
-import { Recommendations } from './Recommendations.js';
+import { Tools } from './Tools.js';
 import { Sessions } from './Sessions.js';
 import { duration } from './format.js';
 import type { Prefs } from '../shared/prefs.js';
@@ -41,11 +39,10 @@ import { useWidth } from './useWidth.js';
 type Screen =
   | { at: 'sessions' }
   | { at: 'insights' }
-  | { at: 'recommendations' }
   | { at: 'analytics' }
   | { at: 'live' }
-  | { at: 'alerts' }
   | { at: 'search' }
+  | { at: 'tools' }
   | { at: 'settings' }
   | { at: 'detail'; session: SessionDetail; tab: string; eventId?: string };
 
@@ -65,10 +62,9 @@ const NAV: NavItem[] = [
   { id: 'sessions', label: 'Sessions', icon: List, ready: true },
   { id: 'search', label: 'Search', icon: SearchIcon, ready: true },
   { id: 'live', label: 'Live', icon: Activity, ready: true },
-  { id: 'alerts', label: 'Alerts', icon: Bell, ready: true },
   { id: 'analytics', label: 'Analytics', icon: ChartColumn, ready: true },
   { id: 'insights', label: 'Insights', icon: Lightbulb, ready: true },
-  { id: 'recommendations', label: 'Recommendations', icon: Sparkles, ready: true },
+  { id: 'tools', label: 'Tools', icon: Wrench, ready: true },
   { id: 'settings', label: 'Settings', icon: SlidersVertical, ready: true },
 ];
 
@@ -95,10 +91,9 @@ const SCREEN_FOR: Record<string, Screen> = {
   sessions: { at: 'sessions' },
   search: { at: 'search' },
   live: { at: 'live' },
-  alerts: { at: 'alerts' },
   analytics: { at: 'analytics' },
   insights: { at: 'insights' },
-  recommendations: { at: 'recommendations' },
+  tools: { at: 'tools' },
   settings: { at: 'settings' },
 };
 
@@ -234,6 +229,16 @@ export function App() {
 
   // Clicking the native notification lands on that Alert's evidence.
   useEffect(() => window.loupe.onOpenAlert(openAlert), [openAlert]);
+
+  // An expiry warning has no Event to land on - it is about something that has
+  // not happened yet - so it opens the countdown itself.
+  useEffect(
+    () =>
+      window.loupe.onOpenTools(() => {
+        setScreen({ at: 'tools' });
+      }),
+    [],
+  );
 
   const go = useCallback((id: string) => {
     setScreen(SCREEN_FOR[id] ?? { at: 'sessions' });
@@ -495,11 +500,12 @@ function CurrentScreen(p: ScreenProps) {
         onOpen={p.onDetail}
         onOpenAlert={p.onOpenAlert}
         collapseAbove={p.prefs.collapseAbove}
+        grouped={p.prefs.groupByProject}
       />
     );
   }
-  if (screen.at === 'alerts') {
-    return <AlertsScreen onOpen={p.onOpenAlert} grouped={p.prefs.groupByProject} />;
+  if (screen.at === 'tools') {
+    return <Tools />;
   }
   if (screen.at === 'settings') {
     return <Settings theme={p.theme} onTheme={p.onTheme} prefs={p.prefs} onPrefs={p.onPrefs} />;
@@ -518,7 +524,6 @@ function CurrentScreen(p: ScreenProps) {
       />
     );
   }
-  if (screen.at === 'recommendations') return <Recommendations />;
 
   // The screen's own bar is drawn while the Transcripts are still being read.
   // Waiting for the parse to show it made the window look like it had not

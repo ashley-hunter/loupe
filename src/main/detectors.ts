@@ -1,5 +1,5 @@
-import { byFile } from '../shared/aggregate.js';
-import type { Finding, SessionDetail } from '../shared/model.js';
+import { byFile, sumCost } from '../shared/aggregate.js';
+import type { Event, Finding, SessionDetail } from '../shared/model.js';
 
 /**
  * Detectors: one function per named wasteful pattern.
@@ -165,6 +165,65 @@ const retryChurn: Detector = (session) => {
   );
 };
 
+/**
+ * Roughly four characters per token, the same yardstick the Inspector uses.
+ *
+ * Injected context is the one thing here without a Measured cost: it has no
+ * Request of its own, so what it added is only knowable from its length. Every
+ * figure derived from this says "about".
+ */
+const estimate = (chars: number): number => Math.round(chars / 4);
+
+/**
+ * The same file re-sent into the context after every edit.
+ *
+ * Claude Code re-injects a file once it has been edited, so a file edited ten
+ * times is ten whole copies of it in the context. Nobody asks for this and no
+ * tool call records it, which is why it went unseen: it arrives as an
+ * `attachment`, not as a Read, so the duplicate-read Detector cannot see it.
+ * Measured here at 12.2k tokens per Session, and 63.6k in the worst one.
+ */
+const reinjectedEdits: Detector = (session) => {
+  const byPath = new Map<string, { copies: number; chars: number }>();
+  for (const e of session.events) {
+    if (e.kind !== 'inject' || e.subtitle !== 'edited_text_file' || e.path === undefined) continue;
+    const at = byPath.get(e.path) ?? { copies: 0, chars: 0 };
+    at.copies++;
+    at.chars += (e.body ?? '').length;
+    byPath.set(e.path, at);
+  }
+
+  return [...byPath.entries()]
+    .map(([path, f]) => ({
+      path,
+      copies: f.copies,
+      cost: estimate(f.chars),
+      // The first copy is the edit being confirmed; the repeats are the waste.
+      wasted: estimate(Math.round((f.chars * (f.copies - 1)) / f.copies)),
+    }))
+    .filter((f) => f.copies > 1 && f.wasted >= WORTH_REPORTING_CHURN)
+    .sort((a, b) => b.wasted - a.wasted)
+    .map((f) => ({
+      id: `${session.id}:reinject:${f.path}`,
+      kind: 'edit-reinjected' as const,
+      category: 'duplication' as const,
+      sessionId: session.id,
+      sessionPath: session.path,
+      sessionName: session.name,
+      project: session.project,
+      tab: 'files' as const,
+      recoverable: f.wasted,
+      // Counted from the length of what was injected, not from a usage figure.
+      estimated: true as const,
+      explanation:
+        'Claude Code puts a file back into the context after each edit to it, so a file ' +
+        'edited repeatedly is held several times over. Making the changes to one file ' +
+        'together, rather than returning to it, costs one copy instead of several.',
+      text: `${short(f.path)} was re-sent ${f.copies} times after edits, about ${fmt(f.cost)} tokens`,
+      evidence: `${f.copies} copies · about ${fmt(f.wasted)} of it repeat`,
+    }));
+};
+
 /** Extensions whose contents are large and rarely referenced twice. */
 const BINARY = /\.(png|jpe?g|gif|webp|bmp|ico|pdf|mp4|mov|zip|tar|gz)$/i;
 
@@ -175,9 +234,36 @@ const BINARY = /\.(png|jpe?g|gif|webp|bmp|ico|pdf|mp4|mov|zip|tar|gz)$/i;
  * back to once described.
  */
 const binaryReads: Detector = (session) => {
-  const reads = byFile(session.events).filter((f) => BINARY.test(f.key) && f.cost > 0);
-  const cost = reads.reduce((n, f) => n + f.cost, 0);
-  if (reads.length === 0 || cost < WORTH_REPORTING) return [];
+  const isPicture = (e: Event): boolean =>
+    (e.path !== undefined && BINARY.test(e.path)) || (e.images !== undefined && e.images > 0);
+
+  /**
+   * Every picture that entered the context, however it got there.
+   *
+   * Read from disk it has a path and a matching extension; handed back by a
+   * tool it has neither, only image blocks in its result - which is how 119
+   * screenshots went uncounted while 1,393 image reads were caught.
+   *
+   * Summed as one set, and through `sumCost`, because a Request that took a
+   * screenshot and read an image shares one cost between both of them. Adding
+   * the two groups separately counted that Request twice.
+   */
+  const pictures = session.events.filter((e) => isPicture(e) && (e.cost ?? 0) > 0);
+  if (pictures.length === 0) return [];
+
+  const cost = sumCost(pictures);
+  if (cost < WORTH_REPORTING) return [];
+
+  const shots = pictures.filter((e) => e.path === undefined);
+  const reads = pictures.filter((e) => e.path !== undefined);
+  const named = (n: number, one: string, many: string): string => `${n} ${n === 1 ? one : many}`;
+
+  const what =
+    shots.length === 0
+      ? named(reads.length, 'image or PDF read', 'image or PDF reads')
+      : reads.length === 0
+        ? named(shots.length, 'screenshot', 'screenshots')
+        : `${named(reads.length, 'image or PDF read', 'image or PDF reads')} and ${named(shots.length, 'screenshot', 'screenshots')}`;
 
   return [
     {
@@ -191,14 +277,14 @@ const binaryReads: Detector = (session) => {
       tab: 'files',
       recoverable: cost,
       explanation:
-        'Images and PDFs are expensive to read and are seldom referred back to once ' +
-        'they have been described. Reading one, acting on it, and not re-reading it keeps the ' +
-        'cost to a single turn.',
-      text: `${reads.length} image or PDF ${reads.length === 1 ? 'read' : 'reads'} costing ${fmt(cost)} tokens`,
-      evidence: reads
-        .slice(0, 3)
-        .map((f) => short(f.key))
-        .join(', '),
+        'Images and PDFs are expensive to put into a context and are seldom referred back to ' +
+        'once they have been described. Reading or capturing one, acting on it, and not ' +
+        'repeating it keeps the cost to a single turn.',
+      text: `${what} costing ${fmt(cost)} tokens`,
+      evidence: [
+        ...reads.slice(0, 3).map((e) => short(e.path ?? e.title)),
+        ...shots.slice(0, 2).map((e) => short(e.title)),
+      ].join(', '),
     },
   ];
 };
@@ -336,6 +422,7 @@ const webRepeats: Detector = (session) => {
 };
 
 export const DETECTORS: Detector[] = [
+  reinjectedEdits,
   reanchoring,
   noisyCommands,
   duplicateReads,

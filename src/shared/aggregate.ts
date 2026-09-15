@@ -18,6 +18,15 @@ export interface Rollup {
   unmeasured: number;
 }
 
+/**
+ * What a set of Events cost, counting a shared Request once.
+ *
+ * Exported because summing `e.cost` by hand is wrong in a way that looks
+ * right: several tool calls in one Request each carry that Request's whole
+ * cost, so a plain reduce multiplies it by however many ran in parallel.
+ */
+export const sumCost = (events: Event[]): number => total(events).cost;
+
 function total(events: Event[]): { cost: number; unmeasured: number } {
   let cost = 0;
   let unmeasured = 0;

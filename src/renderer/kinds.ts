@@ -16,4 +16,5 @@ export const KIND: Record<EventKind, [label: string, colour: string]> = {
   compact: ['COMPACT', 'var(--warn)'],
   model: ['MODEL', 'var(--warn)'],
   config: ['CONFIG', 'var(--dim)'],
+  inject: ['CONTEXT', 'var(--warn)'],
 };

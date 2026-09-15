@@ -7,6 +7,8 @@ import {
   buildFindings,
   buildIndex,
   buildProjects,
+  buildStartup,
+  buildThreshold,
   loadSession,
   runSearch,
 } from './catalogue.js';
@@ -16,6 +18,9 @@ import { watchLive } from './live.js';
 import { readSamples, readUsage, startPolling, type Poller } from './usage.js';
 import type { SessionDetail } from '../shared/model.js';
 import { checkForUpdates, installUpdate, startUpdates, updateState } from './updates.js';
+import { startScheduler, type Scheduler } from './scheduler.js';
+import { readRuns } from './runner.js';
+import type { ActionKind, CacheClock, ToolsConfig } from '../shared/tools.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const DEV_URL = process.env['VITE_DEV_SERVER_URL'];
@@ -208,6 +213,8 @@ async function capture(win: BrowserWindow): Promise<void> {
 }
 
 ipcMain.handle('loupe:index', () => buildIndex());
+ipcMain.handle('loupe:startup', () => buildStartup());
+ipcMain.handle('loupe:threshold', () => buildThreshold());
 ipcMain.handle('loupe:cache', () => buildCacheReport());
 ipcMain.handle('loupe:findings', () => buildFindings());
 ipcMain.handle('loupe:advice', () => buildAdvice());
@@ -227,6 +234,16 @@ ipcMain.handle('loupe:search', (_e, query: string, kind: string) =>
  */
 let stopLive: (() => void) | null = null;
 
+/** The only part of the app that writes anything. Off until it is configured. */
+let scheduler: Scheduler | null = null;
+
+/**
+ * The last expiry announced per Session, so a countdown crossing the warning
+ * line once does not announce itself on every re-parse of the same idle
+ * Session - and so two Sessions expiring together each get their own warning.
+ */
+const warnedExpiry = new Map<string, string>();
+
 /** The most recent reading, so a Live screen opening mid-session is not blank. */
 let latestLive: SessionDetail | null = null;
 
@@ -243,14 +260,91 @@ const broadcast = (channel: string, payload: unknown): void => {
   }
 };
 
+/**
+ * How long before expiry to say something.
+ *
+ * Far enough ahead to be able to act, close enough that the Session really has
+ * been left alone. On a five-minute prefix this means four minutes of silence
+ * have already passed.
+ */
+const EXPIRY_LEAD_MS = 60_000;
+
+/** Nothing smaller than this is worth interrupting anyone about. */
+const EXPIRY_FLOOR = 50_000;
+
+/**
+ * Warn that the cached prefix is about to go.
+ *
+ * The one notification in the app that arrives *before* the cost rather than
+ * after it, which is the only reason it is allowed to interrupt: an Alert can
+ * tell you what you spent, this can still change it.
+ *
+ * It stays quiet for a Session that was already winding down. A long typical
+ * gap means the expiry is what happens when you stop working, and announcing
+ * that would be announcing the end of every session you ever finish.
+ */
+function warnExpiry(clock: CacheClock): void {
+  if (clock.prefix < EXPIRY_FLOOR) return;
+  if (clock.msLeft <= 0 || clock.msLeft > EXPIRY_LEAD_MS) return;
+  if (clock.typicalGapMs > EXPIRY_LEAD_MS * 3) return;
+  if (warnedExpiry.get(clock.sessionId) === clock.expiresAt) return;
+
+  // Marked only once something was actually shown. Recording it first meant a
+  // countdown that happened to cross the line while the window was focused was
+  // marked announced forever, so looking away a moment later got nothing.
+  const [window] = BrowserWindow.getAllWindows();
+  if (window?.isFocused() === true || !Notification.isSupported()) return;
+  warnedExpiry.set(clock.sessionId, clock.expiresAt);
+
+  const held = format(clock.prefix);
+  const worth = Math.round(clock.breakEvenMs / 60_000);
+
+  const note = new Notification({
+    title: `${held} of cached context expires in under a minute`,
+    // The break-even, not just the deadline: the decision is whether to hold
+    // it, and that depends on when you are coming back.
+    body:
+      `${clock.sessionName}\n${clock.project} · worth keeping alive if you are back ` +
+      `within ${String(worth)} min, otherwise let it go`,
+  });
+  note.on('click', () => {
+    const [w] = BrowserWindow.getAllWindows();
+    if (!w) return;
+    if (w.isMinimized()) w.restore();
+    w.focus();
+    w.webContents.send('loupe:open-tools');
+  });
+  note.show();
+}
+
+const format = (n: number): string =>
+  n >= 1_000_000
+    ? `${(n / 1_000_000).toFixed(2)}M`
+    : n >= 1000
+      ? `${(n / 1000).toFixed(0)}k`
+      : String(n);
+
 function beginWatchingLive(): void {
   stopLive?.();
-  stopLive = watchLive((detail) => {
-    latestLive = detail;
-    broadcast('loupe:live', detail);
-    if (!detail) return;
+  stopLive = watchLive((running) => {
+    // Live still follows one Session - the one being typed in, which is the
+    // most recently written. Everything else here works from the whole set.
+    latestLive = running[0] ?? null;
+    broadcast('loupe:live', latestLive);
 
-    const fresh = detectAlerts(detail, alerted);
+    // The scheduler sees the Sessions before anything else does: its whole job
+    // is to act before a deadline, and a tick's delay is sometimes the
+    // difference between acting and reporting.
+    scheduler?.observe(running);
+    const clocks = scheduler?.clocks() ?? [];
+    broadcast('loupe:cache-clock', clocks);
+    for (const clock of clocks) warnExpiry(clock);
+
+    // A Session that has stopped running keeps nothing here.
+    const live = new Set(clocks.map((c) => c.sessionId));
+    for (const id of warnedExpiry.keys()) if (!live.has(id)) warnedExpiry.delete(id);
+
+    const fresh = running.flatMap((detail) => detectAlerts(detail, alerted));
     for (const alert of fresh) alerted.add(alert.id);
     if (fresh.length === 0) return;
 
@@ -293,6 +387,15 @@ ipcMain.handle('loupe:live-start', (event) => {
 ipcMain.handle('loupe:live-stop', () => undefined);
 
 ipcMain.handle('loupe:alert-history', () => readAlerts());
+
+ipcMain.handle('loupe:cache-clock', () => scheduler?.clocks() ?? []);
+ipcMain.handle('loupe:tools-config', () => scheduler?.config() ?? { wakeUps: [], actions: [] });
+ipcMain.handle('loupe:tools-config-set', (_e, config: ToolsConfig) => scheduler?.setConfig(config));
+ipcMain.handle(
+  'loupe:run-action',
+  (_e, kind: ActionKind, sessionId: string) => scheduler?.runNow(kind, sessionId) ?? null,
+);
+ipcMain.handle('loupe:runs', () => readRuns());
 /**
  * The current Allowance, or the most recent recorded reading when the endpoint
  * is unreachable. A recorded sample carries its own timestamp, so the UI can say
@@ -347,6 +450,10 @@ void app.whenReady().then(() => {
     beginWatchingLive();
   });
 
+  scheduler = startScheduler((record) => {
+    broadcast('loupe:run', record);
+  });
+
   poller = startPolling((sample) => {
     for (const w of BrowserWindow.getAllWindows()) w.webContents.send('loupe:usage-sample', sample);
   });
@@ -368,4 +475,5 @@ app.on('before-quit', () => {
   poller?.stop();
   stopLive?.();
   stopUpdates?.();
+  scheduler?.stop();
 });

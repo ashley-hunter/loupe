@@ -1,5 +1,11 @@
 import { Fragment, useMemo, useState } from 'react';
-import { cacheHitRate, newTokens, totalNewTokens, type SessionSummary } from '../shared/model.js';
+import {
+  cacheHitRate,
+  newTokens,
+  totalNewTokens,
+  type SessionStatus,
+  type SessionSummary,
+} from '../shared/model.js';
 import { groupBy } from '../shared/group.js';
 import { rowProps, useRowNav } from './useRowNav.js';
 import { BLANK, duration, model, percent, tokens, when } from './format.js';
@@ -96,6 +102,15 @@ const VALUE: Record<SortKey, (s: SessionSummary) => string | number> = {
   allowance: (s) => s.allowance ?? -1,
 };
 
+const running = (s: SessionSummary): number => (s.status === 'active' ? 1 : 0);
+
+/** What the dot beside a Session name means, for a tooltip and a screen reader. */
+const STATUS: Record<SessionStatus, string> = {
+  active: 'Running',
+  completed: 'Finished',
+  interrupted: 'Interrupted',
+};
+
 const HINT: Partial<Record<SortKey, string>> = {
   allowance:
     'Measured from the usage endpoint. Blank for sessions recorded before this app was installed.',
@@ -135,6 +150,14 @@ export function Sessions({
       : sessions;
     const dir = asc ? 1 : -1;
     return [...filtered].sort((a, b) => {
+      // A running Session has no start date that reflects it. `when` sorts on
+      // when a Session began, so one opened on Monday and still going sorts
+      // below one that finished an hour ago - which is backwards for the
+      // question the column answers. Under newest-first they come to the top.
+      if (sortKey === 'when') {
+        const rank = running(a) - running(b);
+        if (rank !== 0) return rank * dir;
+      }
       const x = VALUE[sortKey](a);
       const y = VALUE[sortKey](b);
       return x === y ? 0 : (x < y ? -1 : 1) * dir;
@@ -284,9 +307,7 @@ function Row({
         className="ellipsis"
         style={{ display: 'flex', alignItems: 'center', gap: 7, paddingRight: 10 }}
       >
-        {s.status === 'active' && (
-          <span style={{ color: 'var(--live)', fontSize: 9, flex: 'none' }}>●</span>
-        )}
+        <span className="status-dot" data-status={s.status} title={STATUS[s.status]} />
         <span className="ellipsis">{s.name}</span>
       </div>
     ),

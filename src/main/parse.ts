@@ -26,6 +26,14 @@ interface Record_ {
   isSidechain?: boolean;
   requestId?: string;
   toolUseResult?: unknown;
+  /** Present on `attachment` records: what Claude Code injected, and why. */
+  attachment?: { type?: string; hookName?: string; filename?: string; path?: string };
+  /** What an attachment actually put into the context, as content blocks. */
+  rendered?: Array<{ content?: unknown }>;
+  /** A title you set yourself, with `/rename`. Beats everything else. */
+  customTitle?: string;
+  /** The short title Claude Code writes for its own resume picker. */
+  aiTitle?: string;
   message?: {
     id?: string;
     model?: string;
@@ -146,7 +154,12 @@ interface ResultBlock {
 /** Record which calls failed, and stash their output when bodies are wanted. */
 function readToolResults(
   r: Record_,
-  into: { failed: Set<string>; bodies: Map<string, string>; keepBodies: boolean },
+  into: {
+    failed: Set<string>;
+    images: Map<string, number>;
+    bodies: Map<string, string>;
+    keepBodies: boolean;
+  },
 ): void {
   const content = r.message?.content;
   if (!Array.isArray(content)) return;
@@ -154,10 +167,28 @@ function readToolResults(
   for (const block of content as ResultBlock[]) {
     if (block.type !== 'tool_result' || !block.tool_use_id) continue;
     if (block.is_error === true) into.failed.add(block.tool_use_id);
+
+    const pictures = countImages(block.content);
+    if (pictures > 0) into.images.set(block.tool_use_id, pictures);
+
     if (!into.keepBodies) continue;
+    // Bodies are for reading, and a base64 image is not readable. Storing one
+    // would also put megabytes into a cache that holds every Session at once.
     const raw = typeof block.content === 'string' ? block.content : JSON.stringify(block.content);
-    into.bodies.set(block.tool_use_id, raw.slice(0, 4000));
+    into.bodies.set(
+      block.tool_use_id,
+      pictures > 0 ? `[${String(pictures)} image]` : raw.slice(0, 4000),
+    );
   }
+}
+
+/** Image blocks in a tool result: a screenshot, or a picture read from disk. */
+function countImages(content: unknown): number {
+  if (!Array.isArray(content)) return 0;
+  return content.filter(
+    (b): b is { type: string } =>
+      typeof b === 'object' && b !== null && (b as { type?: unknown }).type === 'image',
+  ).length;
 }
 
 const contentBlocks = (r: Record_): Array<Record<string, unknown>> =>
@@ -264,6 +295,7 @@ export async function parseTranscript(
   const models = new Map<string, number>();
   const resultOf = new Map<string, string>(); // tool_use id -> result preview
   const failedTools = new Set<string>(); // tool_use ids whose result was an error
+  const imageResults = new Map<string, number>(); // tool_use ids that returned pictures
 
   let cwd = '';
   let prompts = 0;
@@ -272,6 +304,15 @@ export async function parseTranscript(
   let firstAt = '';
   let lastAt = '';
   let name = '';
+  /**
+   * Claude Code names its own Sessions, and those names are better than
+   * anything derivable here: a first prompt is whatever someone happened to
+   * type, which is often a pasted stack trace, a slash command, or the standard
+   * paragraph a compacted Session opens with. The titles are written as
+   * records of their own and updated as the Session goes, so the last one wins.
+   */
+  let customTitle = '';
+  let aiTitle = '';
 
   for await (const line of rl) {
     if (!line) continue;
@@ -283,6 +324,8 @@ export async function parseTranscript(
     }
 
     if (r.cwd && !cwd) cwd = r.cwd;
+    if (r.type === 'custom-title' && r.customTitle) customTitle = r.customTitle;
+    if (r.type === 'ai-title' && r.aiTitle) aiTitle = r.aiTitle;
     if (r.timestamp) {
       if (!firstAt || r.timestamp < firstAt) firstAt = r.timestamp;
       if (r.timestamp > lastAt) lastAt = r.timestamp;
@@ -292,6 +335,14 @@ export async function parseTranscript(
         if (gap > 0 && gap <= IDLE_GAP_MS) activeMs += gap;
       }
       if (at > previousAt) previousAt = at;
+    }
+
+    if (r.type === 'attachment') {
+      if (opts.withEvents) {
+        const injected = injection(r);
+        if (injected) events.push({ ...injected, id: r.uuid ?? `a${events.length}` });
+      }
+      continue;
     }
 
     if (isRealPrompt(r)) {
@@ -317,6 +368,7 @@ export async function parseTranscript(
     if (r.type === 'user' && r.toolUseResult !== undefined && opts.withEvents) {
       readToolResults(r, {
         failed: failedTools,
+        images: imageResults,
         bodies: resultOf,
         keepBodies: opts.withBodies === true,
       });
@@ -377,7 +429,14 @@ export async function parseTranscript(
       // covers all of them and cannot honestly be split.
       const shared = g.toolCalls > 1;
       for (const e of g.events) {
-        finishEvent(e, { cost, shared, thinking: usage.thinking, failedTools, resultOf });
+        finishEvent(e, {
+          cost,
+          shared,
+          thinking: usage.thinking,
+          failedTools,
+          imageResults,
+          resultOf,
+        });
       }
       events.push(...g.events);
     }
@@ -398,7 +457,9 @@ export async function parseTranscript(
     // a worktree. Parsing is a pure read of the Transcript and stays that way.
     repo: cwd ? basename(cwd) : 'unknown',
     cwd,
-    name: name || 'Untitled session',
+    // Yours first, then Claude Code's, then the first prompt that reads like a
+    // title, and only then an admission that there is nothing to call it.
+    name: customTitle || aiTitle || name || 'Untitled session',
     startedAt,
     endedAt,
     spanMs: Math.max(0, Date.parse(endedAt) - Date.parse(startedAt)),
@@ -430,6 +491,7 @@ function finishEvent(
     shared: boolean;
     thinking: number;
     failedTools: ReadonlySet<string>;
+    imageResults: ReadonlyMap<string, number>;
     resultOf: ReadonlyMap<string, string>;
   },
 ): void {
@@ -446,6 +508,8 @@ function finishEvent(
   }
 
   if (from.failedTools.has(e.id)) e.failed = true;
+  const pictures = from.imageResults.get(e.id);
+  if (pictures !== undefined) e.images = pictures;
 
   const body = from.resultOf.get(e.id);
   if (body !== undefined) e.body = body;
@@ -499,6 +563,74 @@ function describeTool(name: string, input: Record<string, unknown>): string {
     }
   }
   return name;
+}
+
+/**
+ * What each kind of injection is, in words.
+ *
+ * Claude Code names them for itself, not for reading: `edited_text_file` is the
+ * file it re-sent after an edit. The names it uses are kept as the subtitle so
+ * the raw kind is still there to group and filter on.
+ */
+const INJECTION: Record<string, string> = {
+  edited_text_file: 'File re-sent after an edit',
+  skill_listing: 'Skill listing',
+  total_tokens_reminder: 'Token count reminder',
+  instructions: 'Instructions',
+  queued_command: 'Queued command',
+  deferred_tools_delta: 'Deferred tool definitions',
+  agent_listing_delta: 'Agent listing',
+  hook_success: 'Hook output',
+  hook_additional_context: 'Hook context',
+  environment: 'Environment',
+  mcp_instructions_delta: 'MCP instructions',
+  invoked_skills: 'Skill loaded',
+  file: 'File attached',
+  bash_output_audience_note: 'Bash output note',
+};
+
+/**
+ * One Event for a record Claude Code injected into the context.
+ *
+ * These carry no `usage` of their own - whatever they added is paid for by the
+ * next Request - so the cost is left null and attributed the same way a tool
+ * result's is. What matters is that they exist at all: roughly a million tokens
+ * of this corpus was context nobody typed and no tool returned, and before this
+ * none of it appeared anywhere in the app.
+ */
+function injection(r: Record_): Omit<Event, 'id'> | null {
+  const kind = r.attachment?.type;
+  if (!kind) return null;
+
+  // What it actually put into the context, which is the only honest size for it.
+  // Kept whether or not bodies were asked for, unlike every other Event.
+  // An injection has no measurable cost, so its content is the only evidence of
+  // what it put into the context - dropping it would leave a Finding with
+  // nothing to stand on. About 4 MB across this corpus.
+  const body = (r.rendered ?? [])
+    .map((b) => (typeof b.content === 'string' ? b.content : ''))
+    .join('');
+  if (body === '') return null;
+
+  const what = INJECTION[kind] ?? kind.replace(/_/g, ' ');
+  // Only a real file becomes a `path`. A hook name is not one, and `byFile`
+  // groups on `path` alone, so putting `UserPromptSubmit` there listed it in
+  // the Files tab and the project rollup as though it were something on disk.
+  const file = r.attachment?.filename ?? r.attachment?.path;
+  const where = file ?? r.attachment?.hookName;
+
+  return {
+    kind: 'inject',
+    at: r.timestamp ?? '',
+    title: where === undefined ? what : `${what}: ${basename(where)}`,
+    subtitle: kind,
+    body,
+    depth: r.isSidechain ? 1 : 0,
+    // Never Measured: an injection has no Request of its own, and splitting the
+    // next Request's write between it and everything else would be a guess.
+    cost: null,
+    ...(file === undefined ? {} : { path: file }),
+  };
 }
 
 const ACTIVE_WINDOW_MS = 5 * 60 * 1000;

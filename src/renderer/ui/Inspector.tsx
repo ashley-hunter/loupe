@@ -1,7 +1,17 @@
 import { useEffect, useState } from 'react';
-import type { Event } from '../../shared/model.js';
+import type { Event, EventKind } from '../../shared/model.js';
 import { KIND } from '../kinds.js';
 import { BLANK, clock, tokens } from '../format.js';
+import { Markdown } from './Markdown.js';
+
+/**
+ * Events whose body is something a person wrote, and so is Markdown.
+ *
+ * Everything else here is machine output - a file, a diff, the stdout of a
+ * command - where a `#` is a comment and a `*` is a glob. Rendering those as
+ * Markdown would mangle them, so they stay exactly as they were written.
+ */
+const PROSE = new Set<EventKind>(['user', 'asst', 'think']);
 
 /**
  * The detail of one Event, beside the list it was picked from.
@@ -76,24 +86,27 @@ export function Inspector({
               <div className="eyebrow" style={{ margin: '14px 0 5px' }}>
                 Content
               </div>
-              <pre
-                className="selectable mono"
+              <div
+                className="selectable"
                 style={{
-                  margin: 0,
                   padding: 9,
                   fontSize: 11.5,
                   lineHeight: 1.45,
                   background: 'var(--codeBg)',
                   border: '1px solid var(--line)',
                   borderRadius: 5,
-                  whiteSpace: 'pre-wrap',
-                  wordBreak: 'break-word',
                   maxHeight: collapsed ? 96 : 420,
                   overflow: 'auto',
                 }}
               >
-                {event.body}
-              </pre>
+                {PROSE.has(event.kind) ? (
+                  <Markdown text={event.body} />
+                ) : (
+                  <div className="mono" style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                    {event.body}
+                  </div>
+                )}
+              </div>
               {big && (
                 <button
                   onClick={() => {

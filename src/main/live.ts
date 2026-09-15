@@ -14,15 +14,22 @@ export const LIVE_WINDOW_MS = 5 * 60 * 1000;
  */
 const SETTLE_MS = 600;
 
-/** The Transcript written to most recently, if anything has been recently. */
-export async function findLiveTranscript(root = TRANSCRIPT_ROOT): Promise<string | null> {
+/**
+ * Every Transcript written to recently, most recent first.
+ *
+ * Plural because several Sessions genuinely do run at once - a long build in
+ * one terminal, a question in another - and each has a cached prefix with its
+ * own deadline. Following only the newest meant the other ones expired
+ * unwatched, and an action could only ever be aimed at whichever happened to
+ * have been typed in last.
+ */
+export async function findLiveTranscripts(root = TRANSCRIPT_ROOT): Promise<string[]> {
   const found = await findTranscripts(root);
-  const newest = found.reduce<{ path: string; mtimeMs: number } | null>(
-    (best, f) => (best === null || f.mtimeMs > best.mtimeMs ? f : best),
-    null,
-  );
-  if (!newest) return null;
-  return Date.now() - newest.mtimeMs < LIVE_WINDOW_MS ? newest.path : null;
+  const now = Date.now();
+  return found
+    .filter((f) => now - f.mtimeMs < LIVE_WINDOW_MS)
+    .sort((a, b) => b.mtimeMs - a.mtimeMs)
+    .map((f) => f.path);
 }
 
 /**
@@ -39,12 +46,12 @@ export async function findLiveTranscript(root = TRANSCRIPT_ROOT): Promise<string
  * memory to close out the previous Event's cost.
  */
 export function watchLive(
-  onUpdate: (detail: SessionDetail | null) => void,
+  onUpdate: (details: SessionDetail[]) => void,
   root = TRANSCRIPT_ROOT,
 ): () => void {
   let watcher: FSWatcher | null = null;
   let settle: NodeJS.Timeout | null = null;
-  let current: string | null = null;
+  let running = 0;
   let stopped = false;
   let reading = false;
 
@@ -52,17 +59,13 @@ export function watchLive(
     if (stopped || reading) return;
     reading = true;
     try {
-      const path = await findLiveTranscript(root);
-      current = path;
-      if (!path) {
-        onUpdate(null);
-        return;
-      }
-      const detail = await loadSession(path).catch(() => null);
+      const paths = await findLiveTranscripts(root);
+      running = paths.length;
+      const details = await Promise.all(paths.map((p) => loadSession(p).catch(() => null)));
       // Same as in the poller: `stopped` can flip while the parse is in flight,
       // which the analyser does not model.
       // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-      if (!stopped) onUpdate(detail);
+      if (!stopped) onUpdate(details.filter((d): d is SessionDetail => d !== null));
     } finally {
       reading = false;
     }
@@ -92,7 +95,7 @@ export function watchLive(
   // A Session can stop being live without anything being written, so the
   // "nothing is running" state needs a nudge of its own.
   const idleCheck = setInterval(() => {
-    if (current !== null) void refresh();
+    if (running > 0) void refresh();
   }, LIVE_WINDOW_MS / 2);
 
   return () => {

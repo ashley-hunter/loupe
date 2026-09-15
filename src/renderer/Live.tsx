@@ -12,6 +12,8 @@ import { Inspector } from './ui/Inspector.js';
 import { Stat } from './ui/Stat.js';
 import { StatStrip } from './ui/StatStrip.js';
 import { clock, duration, percent, tokens } from './format.js';
+import { Alerts as AlertHistory } from './Alerts.js';
+import { Chips } from './ui/Chips.js';
 
 /** How many of the most recent Events to show. Older ones are in the Timeline. */
 const TAIL = 60;
@@ -23,6 +25,7 @@ export function Live({
   onOpen,
   onOpenAlert,
   collapseAbove,
+  grouped,
 }: {
   usage: UsageSample | null;
   alerts: Alert[];
@@ -30,7 +33,17 @@ export function Live({
   onOpen: (detail: SessionDetail) => void;
   onOpenAlert: (alert: Alert) => void;
   collapseAbove: number;
+  /** Shared with the Sessions list, so a long alert history groups the same way. */
+  grouped: boolean;
 }) {
+  /**
+   * The feed is what is happening; the history is what already did.
+   *
+   * Alerts used to be a screen of its own beside this one, which made the
+   * running Session and the record of what it had already cost two places
+   * rather than two views of one place. Nothing was gained by the distance.
+   */
+  const [tab, setTab] = useState<'feed' | 'alerts'>('feed');
   const [session, setSession] = useState<SessionDetail | null>(null);
   const [waiting, setWaiting] = useState(true);
   const [pinned, setPinned] = useState(true);
@@ -59,9 +72,30 @@ export function Live({
     previousCount.current = count;
   }, [session, pinned]);
 
+  const tabs = (
+    <Chips
+      options={[
+        ['feed', 'Feed'],
+        ['alerts', 'History'],
+      ]}
+      value={tab}
+      onChange={setTab}
+    />
+  );
+
+  // The history stands on its own: it is worth reading precisely when nothing
+  // is running, so it must not sit behind a check for a live Session.
+  if (tab === 'alerts') {
+    return (
+      <Shell tabs={tabs}>
+        <AlertHistory onOpen={onOpenAlert} grouped={grouped} embedded />
+      </Shell>
+    );
+  }
+
   if (waiting) {
     return (
-      <Shell>
+      <Shell tabs={tabs}>
         <Empty>Looking for a running session…</Empty>
       </Shell>
     );
@@ -69,7 +103,7 @@ export function Live({
 
   if (!session) {
     return (
-      <Shell>
+      <Shell tabs={tabs}>
         <Empty align="left">
           Nothing is running. A session shows here while its transcript is still being written to —
           start Claude Code anywhere and it will appear.
@@ -88,6 +122,7 @@ export function Live({
     <Shell
       title={session.name}
       project={session.project}
+      tabs={tabs}
       onOpen={() => {
         onOpen(session);
       }}
@@ -245,11 +280,13 @@ function Alerts({
 function Shell({
   title,
   project,
+  tabs,
   onOpen,
   children,
 }: {
   title?: string;
   project?: string;
+  tabs?: React.ReactNode;
   onOpen?: () => void;
   children: React.ReactNode;
 }) {
@@ -271,6 +308,7 @@ function Shell({
             </button>
           </>
         )}
+        <div style={{ marginLeft: title ? 0 : 'auto' }}>{tabs}</div>
       </div>
       {children}
     </div>

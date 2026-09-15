@@ -1,4 +1,4 @@
-import { Bell, Database, Layers } from 'lucide-react';
+import { Bell, Database, Layers, Users } from 'lucide-react';
 import { Fragment, useState } from 'react';
 import type { Alert, AlertKind } from '../shared/model.js';
 import { groupBy } from '../shared/group.js';
@@ -13,6 +13,7 @@ import { TopBar } from './ui/TopBar.js';
 const KINDS: Record<AlertKind, { label: string; icon: typeof Database }> = {
   'oversized-result': { label: 'Oversized result', icon: Layers },
   'prefix-rebuilt': { label: 'Cache rebuilt', icon: Database },
+  'subagent-spend': { label: 'Subagent spend', icon: Users },
 };
 
 /**
@@ -23,7 +24,16 @@ const KINDS: Record<AlertKind, { label: string; icon: typeof Database }> = {
  * the Session it came from and the measured facts behind it, because "cache
  * rebuilt three times" is not a diagnosis on its own.
  */
-export function Alerts({ onOpen, grouped }: { onOpen: (alert: Alert) => void; grouped: boolean }) {
+export function Alerts({
+  onOpen,
+  grouped,
+  embedded = false,
+}: {
+  onOpen: (alert: Alert) => void;
+  grouped: boolean;
+  /** Rendered inside Live, which already has a bar of its own. */
+  embedded?: boolean;
+}) {
   const state = useAsync<Alert[]>(() => window.loupe.alertHistory());
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
 
@@ -37,7 +47,7 @@ export function Alerts({ onOpen, grouped }: { onOpen: (alert: Alert) => void; gr
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
-      <TopBar title="Alerts" />
+      {!embedded && <TopBar title="Alerts" />}
       <div className="scroll-pane">
         <div className="pane-content">
           {state.status === 'loading' && <Empty>Reading the alert history…</Empty>}

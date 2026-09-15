@@ -94,7 +94,14 @@ export type EventKind =
   | 'tool'
   | 'compact'
   | 'model'
-  | 'config';
+  | 'config'
+  /**
+   * Context injected by Claude Code rather than asked for: a file re-sent after
+   * an edit, the skill listing, hook output, an environment block. It is real
+   * context that nobody typed and no tool returned, and until it had a kind of
+   * its own it was the one thing in a Transcript the Timeline could not show.
+   */
+  | 'inject';
 
 /** One entry in a Transcript — the unit the Timeline renders. */
 export interface Event {
@@ -126,6 +133,14 @@ export interface Event {
   toolUseId?: string;
   /** Tool failure, e.g. a non-zero exit code. */
   failed?: boolean;
+  /**
+   * Images this tool call returned.
+   *
+   * A screenshot comes back as an image block in the result and has no path, so
+   * without this it is indistinguishable from any other tool call - which is
+   * how 119 of them went uncounted while images read from disk were caught.
+   */
+  images?: number;
 }
 
 /** One round trip to the model. */
@@ -267,7 +282,9 @@ export type FindingKind =
   | 'binary-read'
   | 'thinking-heavy'
   | 'web-repeat'
-  | 'noisy-command';
+  | 'noisy-command'
+  /** A file put back into the context after each edit to it. */
+  | 'edit-reinjected';
 
 export interface Finding {
   id: string;
@@ -282,6 +299,17 @@ export interface Finding {
   /** Tokens that acting on this would give back. */
   recoverable: number;
   /**
+   * Set when `recoverable` is derived from content length rather than from a
+   * usage figure.
+   *
+   * Injected context has no Request of its own, so what it added is only
+   * knowable from how long it is. That is still a fact about the Transcript,
+   * but it is not the same kind of fact as a Measured one, and a total that
+   * mixes the two without saying so is the sort of quiet overclaim this app
+   * exists to catch.
+   */
+  estimated?: true;
+  /**
    * The shared explanation for this kind of Finding. Identical across every
    * Finding of the same kind, so it is shown once per group rather than
    * repeated on each.
@@ -292,7 +320,7 @@ export interface Finding {
   evidence: string;
 }
 
-export type AlertKind = 'oversized-result' | 'prefix-rebuilt';
+export type AlertKind = 'oversized-result' | 'prefix-rebuilt' | 'subagent-spend';
 
 /**
  * Something expensive that just happened in the running Session.
@@ -331,7 +359,7 @@ export interface Alert {
   detail: string;
   tokens: number;
   /** The tab that shows this Alert's evidence when the Session is opened. */
-  tab: 'timeline' | 'cache';
+  tab: 'timeline' | 'cache' | 'agents';
   /** The Event to select on arrival, when one Event is the whole story. */
   eventId?: string;
   evidence: AlertEvidence[];

@@ -39,6 +39,7 @@
   --green: #3f7d4e;
   --warn: #b8791f;
   --warnBg: #fdf8ef;
+  --warnBd: #e8d5b0;
   --err: #b5443a;
   --errBg: #fdf3f1;
   --errBd: #e8c4bf;
@@ -73,6 +74,7 @@
   --green: #5c9a6c;
   --warn: #c99034;
   --warnBg: rgba(201, 144, 52, 0.1);
+  --warnBd: rgba(201, 144, 52, 0.36);
   --err: #d1584c;
   --errBg: rgba(209, 88, 76, 0.1);
   --errBd: rgba(209, 88, 76, 0.34);
@@ -681,7 +683,8 @@ button {
 
 /* Long replies stay readable rather than running the width of the window. */
 .bubble-text {
-  white-space: pre-wrap;
+  /* No `pre-wrap` here: the Markdown inside owns its own whitespace, and
+     setting it on the bubble inherits into every block the renderer emits. */
   word-break: break-word;
   max-width: 68ch;
 }
@@ -747,4 +750,278 @@ button {
   border-color: var(--errBd);
   background: var(--errBg);
   color: var(--err);
+}
+
+/* ---- Tools -------------------------------------------------------------- */
+
+/*
+ * A small editable value inside a row of prose, rather than a form field in a
+ * form. The rules on the Tools screen read as sentences with numbers in them,
+ * so the input is sized to its content and borrowed the row's own line.
+ */
+.field {
+  height: 22px;
+  padding: 0 6px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--fg);
+  font-size: 11.5px;
+}
+.field:focus-visible {
+  border-color: var(--accentBd);
+}
+.field::placeholder {
+  color: var(--faint);
+}
+
+/*
+ * The switch for something that will act unattended.
+ *
+ * Deliberately not a checkbox: a checkbox reads as a preference, and these
+ * start sessions and rewrite contexts. `role="switch"` carries the state, so
+ * the colour is confirmation rather than the only signal.
+ */
+.switch {
+  flex: none;
+  width: 30px;
+  height: 18px;
+  padding: 2px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--track);
+  transition:
+    background 120ms ease,
+    border-color 120ms ease;
+}
+.switch[aria-checked='true'] {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.switch .knob {
+  display: block;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--panel);
+  transition: transform 120ms ease;
+}
+.switch[aria-checked='true'] .knob {
+  transform: translateX(12px);
+}
+
+/* One letter per weekday. Square, so seven of them read as a week. */
+.daybox {
+  width: 20px;
+  height: 20px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--faint);
+  font-size: 10.5px;
+}
+.daybox[aria-pressed='true'] {
+  border-color: var(--accentBd);
+  background: var(--accentSoft);
+  color: var(--accent);
+}
+
+/* A name that must not push the figures beside it off the row. */
+.truncate {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/*
+ * The state of a Session, beside its name.
+ *
+ * Present on every row rather than only on the running ones. A dot that comes
+ * and goes shifts every name it is missing from, so a column of names no longer
+ * starts on one edge - and "no dot" is not a state anyone can read, it just
+ * looks like the dot failed to load. A hollow ring for a Session that has
+ * stopped, so the two are told apart without relying on colour.
+ */
+.status-dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  border: 1.5px solid var(--faint);
+}
+.status-dot[data-status='active'] {
+  border-color: var(--live);
+  background: var(--live);
+}
+.status-dot[data-status='interrupted'] {
+  border-color: var(--warn);
+}
+
+/*
+ * A turn that paid to rebuild the cached prefix.
+ *
+ * Louder than the note it grew out of, because this is the single largest
+ * avoidable cost the app measures and it used to read like a footnote. The
+ * figure leads: what you want from this line is the number, and only then why.
+ * Compaction keeps the quiet treatment - the context shrank, which is the cache
+ * working rather than money lost.
+ */
+.context-note[data-cost='true'] {
+  border-style: solid;
+  border-color: var(--warnBd);
+  background: var(--warnBg);
+  color: var(--warn);
+}
+
+.cost-figure {
+  flex: none;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+/* ---- Rendered Markdown -------------------------------------------------- */
+
+/*
+ * Block spacing is set here rather than left to the browser, whose defaults are
+ * built for documents and leave far too much air between two lines of chat.
+ * The container keeps `pre-wrap` so a single newline still breaks the line the
+ * way it was typed.
+ */
+.md {
+  /* Stated rather than inherited: this renders inside bubbles and panels that
+     may set their own whitespace, and one `pre-wrap` from an ancestor turns
+     every newline between two blocks into a blank line. */
+  white-space: normal;
+  word-break: break-word;
+}
+/*
+ * `pre-wrap` on the paragraphs, never on the container.
+ *
+ * A single newline inside a paragraph is a line break here, because that is how
+ * it was typed and chat reads wrong without it. But react-markdown also emits a
+ * newline text node *between* blocks, and a container set to `pre-wrap` renders
+ * every one of those as a blank line - so a bulleted list ends up floating in
+ * whitespace. Scoping it to the leaves keeps the breaks that were meant and
+ * drops the ones that are just markup.
+ */
+.md p,
+.md li,
+.md-table td,
+.md-table th {
+  white-space: pre-wrap;
+}
+.md > :first-child {
+  margin-top: 0;
+}
+.md > :last-child {
+  margin-bottom: 0;
+}
+.md p {
+  margin: 0 0 8px;
+}
+
+/* Three sizes, not six: past the third level the difference stops carrying
+   meaning and only makes a chat bubble look like a specimen sheet. */
+.md h1,
+.md h2,
+.md h3,
+.md h4,
+.md h5,
+.md h6 {
+  font-weight: 600;
+  margin: 14px 0 6px;
+  letter-spacing: -0.01em;
+}
+.md h1 {
+  font-size: 15px;
+}
+.md h2 {
+  font-size: 13.5px;
+}
+.md h3,
+.md h4,
+.md h5,
+.md h6 {
+  font-size: 12.5px;
+  color: var(--dim);
+}
+
+.md ul,
+.md ol {
+  margin: 0 0 8px;
+  padding-left: 18px;
+}
+.md li {
+  margin: 2px 0;
+}
+.md li > p {
+  margin: 0;
+}
+
+.md blockquote {
+  margin: 8px 0;
+  padding-left: 10px;
+  border-left: 2px solid var(--line);
+  color: var(--dim);
+}
+
+.md hr {
+  margin: 12px 0;
+  border: none;
+  border-top: 1px solid var(--line);
+}
+
+.md a {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.md code {
+  font-family: var(--mono);
+  font-size: 0.92em;
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: var(--hover);
+}
+
+.md-code {
+  /* `pre`, not `pre-wrap`: code that wraps mid-token is harder to read than
+     code you scroll, and the bubble must not stretch to the longest line. */
+  white-space: pre;
+  overflow-x: auto;
+  margin: 8px 0;
+  padding: 9px 11px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg);
+}
+.md-code code {
+  padding: 0;
+  background: none;
+  font-size: 11.5px;
+  line-height: 1.55;
+}
+
+.md-table-wrap {
+  overflow-x: auto;
+  margin: 8px 0;
+}
+.md-table {
+  border-collapse: collapse;
+  font-size: 11.5px;
+}
+.md-table th,
+.md-table td {
+  border: 1px solid var(--line);
+  padding: 4px 8px;
+  text-align: left;
+  /* The cells came from one line of pipes; re-wrapping them is the point. */
+  white-space: normal;
+  vertical-align: top;
+}
+.md-table th {
+  font-weight: 600;
+  background: var(--hover);
 }

@@ -11,6 +11,9 @@ import type {
 } from '../shared/model.js';
 import { EMPTY_USAGE } from '../shared/model.js';
 import { buildRecommendations } from './recommendations.js';
+import { startupCosts } from './startup.js';
+import { measureThreshold } from './compaction.js';
+import type { StartupCost, Threshold } from '../shared/tools.js';
 import { byProject, type ProjectRollup } from '../shared/rollup.js';
 import { findAll } from './detectors.js';
 import { search, type SearchResult } from './search.js';
@@ -137,7 +140,7 @@ type Cache = Record<string, CacheEntry>;
  * `subagentUsage` turned every existing install into a crash on launch. A
  * rebuild costs a few seconds; a stale entry costs correctness.
  */
-const CACHE_VERSION = 2;
+const CACHE_VERSION = 3;
 
 interface CacheFile {
   version: number;
@@ -233,7 +236,27 @@ export async function buildIndex(root = TRANSCRIPT_ROOT): Promise<IndexResult> {
  */
 const detailCache = new Map<string, { mtimeMs: number; detail: SessionDetail }>();
 
-export async function loadAllDetails(root = TRANSCRIPT_ROOT): Promise<SessionDetail[]> {
+/**
+ * The parse currently in flight, so two callers share one.
+ *
+ * Every screen that needs whole Sessions goes through here, and more than one
+ * can ask at once - the Tools screen asks for startup costs and the compaction
+ * threshold as it mounts. Without this they each walk the corpus, so the work
+ * is done twice and the memoised results of the first are not ready in time to
+ * help the second. Keyed by root so a demo run does not wait on the real one.
+ */
+const inFlight = new Map<string, Promise<SessionDetail[]>>();
+
+export function loadAllDetails(root = TRANSCRIPT_ROOT): Promise<SessionDetail[]> {
+  const running = inFlight.get(root);
+  if (running) return running;
+
+  const started = parseAll(root).finally(() => inFlight.delete(root));
+  inFlight.set(root, started);
+  return started;
+}
+
+async function parseAll(root: string): Promise<SessionDetail[]> {
   const found = await findTranscripts(root);
 
   const details = await Promise.all(
@@ -277,6 +300,14 @@ export async function buildCacheReport(
  */
 export const buildFindings = async (root = TRANSCRIPT_ROOT): Promise<Finding[]> =>
   findAll(await loadAllDetails(root));
+
+/** The context size compaction has actually happened at, across every Session. */
+export const buildThreshold = async (root = TRANSCRIPT_ROOT): Promise<Threshold> =>
+  measureThreshold(await loadAllDetails(root));
+
+/** What starting a Session costs in each project, before any work is done. */
+export const buildStartup = async (root = TRANSCRIPT_ROOT): Promise<StartupCost[]> =>
+  startupCosts(await loadAllDetails(root));
 
 /** Advice that carries no measurable token saving. */
 export const buildAdvice = async (root = TRANSCRIPT_ROOT): Promise<Recommendation[]> =>

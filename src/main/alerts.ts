@@ -1,4 +1,10 @@
-import type { Alert, AlertEvidence, Event, SessionDetail } from '../shared/model.js';
+import {
+  newTokens,
+  type Alert,
+  type AlertEvidence,
+  type Event,
+  type SessionDetail,
+} from '../shared/model.js';
 
 /**
  * Watch a running Session for things worth interrupting someone over.
@@ -7,9 +13,10 @@ import type { Alert, AlertEvidence, Event, SessionDetail } from '../shared/model
  * just *after* the cost was paid — this warns, it never prevents. Keeping that
  * honest matters: the wording says what happened, not what to avoid.
  *
- * Only two things qualify, because a notification nobody trusts is worse than
- * none: a single result that dwarfed everything else in the Session, and a
- * cached prefix being rebuilt over and over.
+ * Only three things qualify, because a notification nobody trusts is worse than
+ * none: a single result that dwarfed everything else in the Session, a cached
+ * prefix being rebuilt over and over, and delegated work outgrowing the Session
+ * that delegated it.
  */
 
 /** Nothing below this interrupts anyone, however unusual it is for the Session. */
@@ -31,6 +38,17 @@ const MAX_AGE_MS = 15 * 60_000;
 /** Re-anchoring only matters once it is a pattern, inside this window. */
 const REBUILD_WINDOW_MS = 10 * 60_000;
 const REBUILD_RUN = 3;
+
+/**
+ * Delegated spend worth interrupting over.
+ *
+ * Subagents are the largest thing in the corpus and the easiest to miss: each
+ * has its own context window and its own Transcript, so none of it shows up in
+ * the Session's own usage. Measured here, they are 52% of all new tokens, and
+ * the heaviest Session spent 138.4M across its agents against 27.6M of its own.
+ * Nothing warned about that while it was happening.
+ */
+const SUBAGENT_FLOOR = 2_000_000;
 
 const median = (values: number[]): number => {
   if (values.length === 0) return 0;
@@ -145,7 +163,59 @@ export function detectAlerts(
     });
   }
 
+  alerts.push(...subagentSpend(session, seen));
   return alerts;
+}
+
+/**
+ * Delegated work that has outgrown the Session delegating it.
+ *
+ * Raised on a doubling rather than on a fixed line: a Session that crosses two
+ * million will go on to cross three and four, and one Alert per step would be
+ * a stream of the same news. The Alert is not "this is too much" - it is
+ * "this is where it went", because the figure is invisible everywhere else
+ * until the Session is over.
+ */
+function subagentSpend(session: SessionDetail, seen: ReadonlySet<string>): Alert[] {
+  const spent = session.subagentDetail.reduce((n, a) => n + newTokens(a.usage), 0);
+  if (spent < SUBAGENT_FLOOR) return [];
+
+  // The step this spend has reached: 2M, 4M, 8M. One Alert per step.
+  const step = Math.floor(Math.log2(spent / SUBAGENT_FLOOR));
+  const id = `agents:${session.id}:${String(step)}`;
+  if (seen.has(id)) return [];
+
+  const own = newTokens(session.usage);
+  const costliest = [...session.subagentDetail]
+    .sort((a, b) => newTokens(b.usage) - newTokens(a.usage))
+    .slice(0, 3);
+
+  return [
+    {
+      id,
+      kind: 'subagent-spend',
+      sessionId: session.id,
+      sessionName: session.name,
+      project: session.project,
+      repo: session.repo,
+      sessionPath: session.path,
+      at: new Date().toISOString(),
+      title: `Subagents have spent ${format(spent)} in this session`,
+      detail:
+        `${String(session.subagentDetail.length)} agents, against ${format(own)} spent by the ` +
+        'session itself. Each has its own context window, so none of this appears in the ' +
+        "session's own usage.",
+      tokens: spent,
+      tab: 'agents',
+      evidence: costliest.map((a) => ({
+        // A Subagent finishes when it finishes; the Session's own clock is the
+        // closest honest timestamp for "this is what it had spent by now".
+        at: session.endedAt,
+        label: `${a.type}: ${a.description.slice(0, 80)}`,
+        tokens: newTokens(a.usage),
+      })),
+    },
+  ];
 }
 
 /**
